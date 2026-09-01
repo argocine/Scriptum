@@ -16,6 +16,11 @@ features or their contents.
 Focus Mode and writing-sprint progress are session-only. Timer and word-goal
 values stay in memory and are discarded when the sprint ends or the app quits.
 
+Table Read uses the browser or operating system speech-synthesis interface but
+offers only voices explicitly marked as on-device. Scriptum refuses voices
+marked as remote or whose local status is unknown. It does not use the
+microphone, record audio, store voice assignments, or upload screenplay text.
+
 ## Desktop application
 
 - Scriptum reads a screenplay only after you choose a file or open a supported

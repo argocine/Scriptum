@@ -379,6 +379,7 @@ function buildMenu() {
         cmd('Writing Sprint…', 'CmdOrCtrl+Shift+K', 'menu:sprint'),
         cmd('Pause / Resume Sprint', 'CmdOrCtrl+Shift+Space', 'menu:sprint-pause'),
         cmd('End Sprint', 'CmdOrCtrl+Shift+E', 'menu:sprint-end'),
+        cmd('Table Read…', 'CmdOrCtrl+Shift+Y', 'menu:table-read'),
         cmd('Reports…', 'CmdOrCtrl+R', 'menu:reports'),
         { type: 'separator' },
         cmd('Zoom In', 'CmdOrCtrl+Plus', 'menu:zoom-in'),

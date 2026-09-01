@@ -40,6 +40,13 @@ import {
   MIN_SPRINT_MINUTES,
 } from '../features/sprint.js';
 import {
+  TableReadController,
+  buildTableReadSegments,
+  localSpeechVoices,
+  tableReadSpeakers,
+  voiceKey,
+} from '../features/table-read.js';
+import {
   addProductionCategory,
   applyProductionTag,
   ensureProductionItem,
@@ -93,6 +100,10 @@ let closeCurrent = null;
 let fieldCounter = 0;
 
 export function openDialog({ title, body, buttons = [], wide = false, onClose }) {
+  // One modal shell serves the whole application. Close the current owner
+  // before replacing its DOM so feature-specific cleanup (speech, timers,
+  // listeners) can never become unreachable behind a newer dialog.
+  closeCurrent?.();
   const overlay = document.getElementById('overlay');
   const dialog = document.getElementById('dialog');
   const titleEl = document.getElementById('dialog-title');
@@ -108,10 +119,11 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
   dialog.classList.toggle('wide', wide);
 
   const close = () => {
+    if (closeCurrent && closeCurrent !== close) return;
     overlay.classList.add('hidden');
     appEl.inert = false;
     document.removeEventListener('keydown', onKey);
-    closeCurrent = null;
+    if (closeCurrent === close) closeCurrent = null;
     onClose?.();
     if (previousFocus?.isConnected && previousFocus.getClientRects().length) previousFocus.focus();
   };
@@ -126,7 +138,7 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
           type: 'button',
           onClick: () => {
             const keepOpen = b.onClick?.();
-            if (!keepOpen) close();
+            if (!keepOpen && closeCurrent === close) close();
           },
         },
         b.label
@@ -1725,6 +1737,190 @@ export function lockScenesAction(editor, toast) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Local-only table read
+ * ------------------------------------------------------------------ */
+
+export function tableReadDialog(editor) {
+  const segments = buildTableReadSegments(editor.doc);
+  const speakers = tableReadSpeakers(segments);
+  const synthesis = window.speechSynthesis || null;
+  const Utterance = window.SpeechSynthesisUtterance || null;
+  let voices = [];
+  const assignments = new Map();
+  let activeLine = null;
+  let voicePoll = null;
+  let voiceSignature = '';
+
+  const privacy = h(
+    'p',
+    { class: 'hint table-read-privacy' },
+    'Local only: Scriptum offers voices marked on-device by your browser or operating system. It refuses remote-service voices and never records audio.'
+  );
+  const voiceStatus = h('div', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+  const voiceGrid = h('div', { class: 'table-read-voices' });
+  const status = h('div', { class: 'table-read-status', role: 'status', 'aria-live': 'polite' });
+  const play = h('button', { class: 'btn primary', type: 'button' }, 'Read');
+  const pause = h('button', { class: 'btn', type: 'button', disabled: true }, 'Pause');
+  const stop = h('button', { class: 'btn', type: 'button', disabled: true }, 'Stop');
+  const previous = h('button', { class: 'btn', type: 'button', 'aria-label': 'Previous table-read line' }, '←');
+  const next = h('button', { class: 'btn', type: 'button', 'aria-label': 'Next table-read line' }, '→');
+  const rateValue = h('span', { class: 'mono' }, '1.0×');
+  const rate = h('input', {
+    type: 'range', min: '0.5', max: '2', step: '0.1', value: '1',
+    'aria-label': 'Table-read speed',
+  });
+  const controls = h(
+    'div',
+    { class: 'table-read-controls' },
+    play,
+    pause,
+    stop,
+    previous,
+    next,
+    h('label', { class: 'table-read-rate' }, 'Speed', rate, rateValue)
+  );
+  const list = h('div', { class: 'table-read-list', 'aria-label': 'Table-read lines' });
+  const lineButtons = segments.map((entry, index) => {
+    const button = h(
+      'button',
+      {
+        class: 'table-read-line',
+        type: 'button',
+      },
+      h('b', {}, entry.speaker),
+      h('span', {}, entry.text)
+    );
+    list.appendChild(button);
+    return button;
+  });
+
+  const resolveVoice = (entry) => {
+    const role = entry.kind === 'narration' ? 'Narrator' : entry.speaker;
+    const key = assignments.get(role) || assignments.get('Narrator');
+    return voices.find((voice) => voiceKey(voice) === key) || null;
+  };
+
+  const controller = new TableReadController({
+    synthesis,
+    Utterance,
+    onUpdate: (snapshot) => {
+      const labels = {
+        idle: 'There is no screenplay text to read.',
+        ready: `${snapshot.total} lines ready.`,
+        playing: `Reading line ${snapshot.index + 1} of ${snapshot.total}: ${snapshot.segment?.speaker || ''}.`,
+        paused: `Paused at line ${snapshot.index + 1} of ${snapshot.total}.`,
+        stopped: `Stopped at line ${snapshot.index + 1} of ${snapshot.total}.`,
+        completed: `Table read complete — ${snapshot.total} lines.`,
+        error: snapshot.error,
+      };
+      status.textContent = labels[snapshot.status] || '';
+      play.textContent = snapshot.status === 'paused' ? 'Resume' : snapshot.status === 'completed' ? 'Read Again' : 'Read';
+      pause.disabled = snapshot.status !== 'playing';
+      stop.disabled = !['playing', 'paused'].includes(snapshot.status);
+      previous.disabled = !snapshot.total || snapshot.index <= 0;
+      next.disabled = !snapshot.total || snapshot.index >= snapshot.total - 1;
+      if (activeLine) {
+        activeLine.classList.remove('active');
+        activeLine.removeAttribute('aria-current');
+      }
+      activeLine = lineButtons[snapshot.index] || null;
+      if (activeLine) {
+        activeLine.classList.add('active');
+        activeLine.setAttribute('aria-current', 'true');
+        if (snapshot.status === 'playing') activeLine.scrollIntoView({ block: 'nearest' });
+      }
+    },
+  });
+  controller.load(segments, { resolveVoice });
+
+  const voiceOption = (voice, selected) =>
+    h(
+      'option',
+      { value: voiceKey(voice), selected },
+      `${voice.name || 'System voice'}${voice.lang ? ` — ${voice.lang}` : ''}`
+    );
+  const refreshVoices = () => {
+    try {
+      voices = localSpeechVoices(synthesis?.getVoices?.() || []);
+    } catch {
+      voices = [];
+    }
+    const signature = voices.map(voiceKey).join('\u0001');
+    if (signature === voiceSignature && voiceGrid.childElementCount) return;
+    voiceSignature = signature;
+    voiceGrid.innerHTML = '';
+    if (!voices.length) {
+      voiceStatus.textContent = synthesis
+        ? 'No on-device voices are available. Install or enable a local system voice to use Table Read.'
+        : 'Speech synthesis is not available in this browser or operating system.';
+      play.disabled = true;
+      return;
+    }
+    voiceStatus.textContent = `${voices.length} on-device voice${voices.length === 1 ? '' : 's'} available. Omitted scenes are skipped.`;
+    const roles = ['Narrator', ...speakers];
+    roles.forEach((role, index) => {
+      const existing = assignments.get(role);
+      const selected = voices.some((voice) => voiceKey(voice) === existing)
+        ? existing
+        : voiceKey(voices[index % voices.length]);
+      assignments.set(role, selected);
+      const select = h(
+        'select',
+        { onChange: (event) => assignments.set(role, event.target.value) },
+        ...voices.map((voice) => voiceOption(voice, voiceKey(voice) === selected))
+      );
+      voiceGrid.appendChild(field(role, select));
+    });
+    play.disabled = !segments.length;
+    if (voices.length && voicePoll) {
+      clearInterval(voicePoll);
+      voicePoll = null;
+    }
+  };
+
+  play.addEventListener('click', () => controller.play());
+  pause.addEventListener('click', () => controller.pause());
+  stop.addEventListener('click', () => controller.stop());
+  previous.addEventListener('click', () => controller.seek(controller.index - 1));
+  next.addEventListener('click', () => controller.seek(controller.index + 1));
+  rate.addEventListener('input', () => {
+    const value = controller.setRate(Number(rate.value));
+    rateValue.textContent = `${value.toFixed(1)}×`;
+  });
+  lineButtons.forEach((button, index) => {
+    button.addEventListener('click', () => controller.seek(index, { autoplay: controller.status === 'playing' }));
+  });
+
+  const onVoicesChanged = () => refreshVoices();
+  synthesis?.addEventListener?.('voiceschanged', onVoicesChanged);
+  refreshVoices();
+  if (synthesis && !voices.length) {
+    let attempts = 0;
+    voicePoll = setInterval(() => {
+      attempts += 1;
+      refreshVoices();
+      if (attempts >= 20 && voicePoll) {
+        clearInterval(voicePoll);
+        voicePoll = null;
+      }
+    }, 250);
+  }
+
+  const body = h('div', {}, privacy, voiceStatus, voiceGrid, controls, status, list);
+  openDialog({
+    title: 'Table Read',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+    onClose: () => {
+      controller.destroy();
+      synthesis?.removeEventListener?.('voiceschanged', onVoicesChanged);
+      if (voicePoll) clearInterval(voicePoll);
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ *
  * Focus mode / writing sprints
  * ------------------------------------------------------------------ */
 
@@ -1820,6 +2016,7 @@ export function shortcutsDialog() {
         ['F6', 'Move between the screenplay and sprint controls'],
         ['⌘⇧Space', 'Pause or resume a sprint'],
         ['⌘⇧E', 'End a sprint'],
+        ['⌘⇧Y', 'Open Table Read'],
         ['⌘R', 'Reports'],
       ],
     ],

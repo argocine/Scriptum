@@ -52,6 +52,7 @@ const MENU_CHANNELS = [
   'menu:sprint',
   'menu:sprint-pause',
   'menu:sprint-end',
+  'menu:table-read',
   'menu:reports',
   'menu:zoom-in',
   'menu:zoom-out',

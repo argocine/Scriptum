@@ -40,6 +40,7 @@ import {
   revisionRoomDialog,
   storyEntryDialog,
   sprintSetupDialog,
+  tableReadDialog,
   reportsDialog,
   formatAssistantDialog,
   productionTagDialog,
@@ -309,6 +310,7 @@ function wireToolbar() {
   on('tb-revision-room', openRevisionRoom);
   on('tb-format-assistant', openFormatAssistant);
   on('tb-reports', openReports);
+  on('tb-table-read', () => tableReadDialog(editor));
   on('tb-title', () => titlePageDialog(editor));
   on('tb-focus', toggleFocusMode);
   on('tb-sprint', openSprintSetup);
@@ -548,6 +550,7 @@ function wireMenus() {
   m('menu:sprint', openSprintSetup);
   m('menu:sprint-pause', toggleSprintPause);
   m('menu:sprint-end', finishWritingSprint);
+  m('menu:table-read', () => tableReadDialog(editor));
   m('menu:reports', openReports);
   m('menu:zoom-in', () => setZoom(state.zoom + 10));
   m('menu:zoom-out', () => setZoom(state.zoom - 10));
@@ -596,6 +599,11 @@ function wireMenus() {
       finishWritingSprint();
       return;
     }
+    if (k === 'y' && e.shiftKey) {
+      e.preventDefault();
+      tableReadDialog(editor);
+      return;
+    }
     if (map[k] && !(k === 'b' || k === 'i' || k === 'u')) {
       e.preventDefault();
       map[k]();
@@ -613,6 +621,7 @@ function privacyDialog() {
     h('p', {}, 'Scriptum has no accounts, analytics, advertising, telemetry, cloud sync, or crash reporting.'),
     h('p', {}, 'Your screenplay is read only when you choose a file and written only to a destination you choose.'),
     h('p', {}, 'Writing-sprint time and word progress stay in memory only and are discarded when the session ends or Scriptum quits.'),
+    h('p', {}, 'Table Read uses only voices marked on-device by the system. It refuses remote voices and never records audio.'),
     h('p', {}, recovery),
     h('p', { class: 'hint' }, 'The hosted browser version is delivered by GitHub Pages, whose normal web-server privacy terms apply.')
   );

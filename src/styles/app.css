@@ -822,6 +822,100 @@ textarea {
 }
 
 /* ------------------------------------------------------------------ *
+ * Local table read
+ * ------------------------------------------------------------------ */
+
+.table-read-privacy {
+  margin: 0 0 10px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.table-read-voices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 8px;
+  max-height: 180px;
+  margin: 10px 0;
+  padding-right: 4px;
+  overflow: auto;
+}
+.table-read-voices .field {
+  margin: 0;
+}
+.table-read-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 8px;
+}
+.table-read-rate {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.table-read-rate input {
+  width: 100px;
+  accent-color: var(--accent);
+}
+.table-read-status {
+  min-height: 20px;
+  color: var(--muted);
+  font-size: 11.5px;
+}
+.table-read-list {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.table-read-line {
+  display: grid;
+  grid-template-columns: minmax(100px, 0.28fr) 1fr;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.table-read-line:last-child {
+  border-bottom: 0;
+}
+.table-read-line b {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-read-line span {
+  line-height: 1.4;
+}
+.table-read-line:hover {
+  background: var(--panel-2);
+}
+.table-read-line.active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.table-read-line:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* ------------------------------------------------------------------ *
  * Dialogs
  * ------------------------------------------------------------------ */
 
