@@ -31,6 +31,7 @@ import {
   CHARACTER_COLUMNS,
   LOCATION_COLUMNS,
 } from '../features/reports.js';
+import { auditDocument } from '../features/format-assistant.js';
 
 /* ------------------------------------------------------------------ *
  * Tiny DOM builder
@@ -619,6 +620,88 @@ export function revisionsDialog(editor, toast) {
 function today() {
   const d = new Date();
   return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Format Assistant
+ * ------------------------------------------------------------------ */
+
+export function formatAssistantDialog(editor, { onGoTo } = {}) {
+  const issues = auditDocument(editor.doc, editor.pagination);
+  const counts = { error: 0, warning: 0, info: 0 };
+  issues.forEach((issue) => {
+    counts[issue.severity] += 1;
+  });
+
+  const summary = issues.length
+    ? `${issues.length} ${issues.length === 1 ? 'item' : 'items'} found: ` +
+      `${counts.error} errors, ${counts.warning} warnings, ${counts.info} information.`
+    : 'No structural or PDF compatibility problems found.';
+
+  const body = h(
+    'div',
+    {},
+    h('p', { class: 'format-summary', role: 'status', 'aria-live': 'polite' }, summary),
+    h(
+      'p',
+      { class: 'hint' },
+      'Format Assistant checks document structure and PDF character support. It does not judge spelling, grammar, or writing style.'
+    )
+  );
+
+  if (!issues.length) {
+    body.appendChild(h('div', { class: 'format-empty' }, 'Your screenplay passed every check.'));
+  } else {
+    const list = h('div', { class: 'format-issues', role: 'list', 'aria-label': 'Format issues' });
+    for (const issue of issues) {
+      const location = [
+        issue.page ? `Page ${issue.page}` : null,
+        issue.field?.startsWith('title.') ? 'Title page' : null,
+        issue.field?.startsWith('revisions.') ? 'Revision settings' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const row = h(
+        'div',
+        { class: `format-issue ${issue.severity}`, role: 'listitem' },
+        h(
+          'div',
+          { class: 'format-issue-copy' },
+          h('div', { class: 'format-issue-level' }, issue.severity),
+          h('div', { class: 'format-issue-message' }, issue.message),
+          location ? h('div', { class: 'format-issue-location' }, location) : null
+        )
+      );
+      if (issue.elementId || issue.field) {
+        row.appendChild(
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn',
+              'aria-label': `Go to: ${issue.message}`,
+              onClick: () => {
+                closeDialog();
+                onGoTo?.(issue);
+              },
+            },
+            'Go To'
+          )
+        );
+      }
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+  }
+
+  openDialog({
+    title: 'Format Assistant',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+  });
+
+  return issues;
 }
 
 /* ------------------------------------------------------------------ *

@@ -15,6 +15,7 @@ import { Finder } from './features/find.js';
 import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
 import { exportPDF } from './io/pdf.js';
+import { pdfSupportIssues } from './features/format-assistant.js';
 import {
   serializeProject,
   parseProject,
@@ -30,6 +31,7 @@ import {
   sceneNumbersDialog,
   revisionsDialog,
   reportsDialog,
+  formatAssistantDialog,
   notesDialog,
   gotoSceneDialog,
   pageLockDialog,
@@ -265,6 +267,7 @@ function wireToolbar() {
   on('tb-cards', toggleCards);
   on('tb-find', openFind);
   on('tb-revision', () => revisionsDialog(editor, toast));
+  on('tb-format-assistant', openFormatAssistant);
   on('tb-reports', openReports);
   on('tb-title', () => titlePageDialog(editor));
   on('tb-privacy', privacyDialog);
@@ -422,6 +425,7 @@ function wireMenus() {
 
   m('menu:element-settings', () => elementSettingsDialog(editor));
   m('menu:page-setup', () => pageSetupDialog(editor));
+  m('menu:format-assistant', openFormatAssistant);
   m('menu:scene-numbers', () => sceneNumbersDialog(editor));
   m('menu:lock-scenes', () => lockScenesAction(editor, toast));
   m('menu:revisions', () => revisionsDialog(editor, toast));
@@ -603,6 +607,20 @@ async function exportText(text, kind) {
 
 async function exportPdf() {
   try {
+    const unsupported = pdfSupportIssues(editor.doc, editor.pagination);
+    if (unsupported.length) {
+      const characterCount = unsupported.reduce((total, issue) => total + issue.count, 0);
+      const choice = await platform.confirm({
+        message: 'Some characters cannot be printed by the current PDF font.',
+        detail:
+          `${characterCount} ${characterCount === 1 ? 'character' : 'characters'} in ` +
+          `${unsupported.length} ${unsupported.length === 1 ? 'place will' : 'places will'} ` +
+          'appear as ?. Format Assistant can take you to each affected screenplay element.',
+        buttons: ['Export Anyway', 'Cancel'],
+        defaultId: 1,
+      });
+      if (choice !== 0) return;
+    }
     const bytes = exportPDF(editor.doc, editor.pagination, editor.styles);
     const path = await platform.saveBinary(bytes, {
       defaultName: suggestedName('pdf'),
@@ -733,6 +751,39 @@ function openReports() {
       platform.save(csv, { defaultName: `${suggestedName('csv').replace('.csv', '')}-${name}.csv`, kind: 'csv' }),
     onJumpToScene: jumpToScene,
   });
+}
+
+function openFormatAssistant() {
+  formatAssistantDialog(editor, { onGoTo: jumpToFormatIssue });
+}
+
+function jumpToFormatIssue(issue) {
+  if (issue?.field?.startsWith('title.')) {
+    titlePageDialog(editor);
+    return;
+  }
+  if (issue?.field?.startsWith('revisions.')) {
+    revisionsDialog(editor, toast);
+    return;
+  }
+  if (!issue?.elementId) return;
+  if (state.cardsOpen) toggleCards();
+  const index = indexOfElement(editor.doc, issue.elementId);
+  if (index === -1) return;
+  editor.renderer.scrollToElement(issue.elementId, 'smooth');
+  const start = Math.max(0, issue.range?.start || 0);
+  const end = Math.max(start, issue.range?.end || start);
+  editor.setCaret(issue.elementId, start, { scroll: true });
+  if (end > start) {
+    editor.selectRange({
+      start: { elementId: issue.elementId, offset: start },
+      end: { elementId: issue.elementId, offset: end },
+      startIndex: index,
+      endIndex: index,
+      collapsed: false,
+    });
+  }
+  dom.pages.focus();
 }
 
 /* ------------------------------------------------------------------ *

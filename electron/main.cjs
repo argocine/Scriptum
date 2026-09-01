@@ -346,6 +346,7 @@ function buildMenu() {
         cmd('Underline', 'CmdOrCtrl+U', 'menu:underline'),
         { type: 'separator' },
         cmd('Dual Dialogue', 'CmdOrCtrl+Alt+D', 'menu:dual'),
+        cmd('Format Assistant…', null, 'menu:format-assistant'),
         cmd('Element Settings…', null, 'menu:element-settings'),
         cmd('Page Setup…', null, 'menu:page-setup'),
       ],

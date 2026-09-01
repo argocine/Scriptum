@@ -408,19 +408,93 @@ export function adjustStyles(styles, at, delta) {
     .filter((r) => r.end > r.start);
 }
 
-/** Split style ranges for an element cut at character offset `at`. */
-export function splitStyles(styles, at) {
+/**
+ * Re-anchor arbitrary character ranges after replacing [start,end) with text.
+ *
+ * Range-specific fields are preserved. Insertions at an exact range boundary
+ * stay outside that range; insertions strictly inside it expand the range.
+ * Replacing text overlapped by a range keeps the replacement in that range.
+ * This neutral primitive is shared groundwork for production-tag ranges.
+ */
+export function adjustRangesForReplacement(ranges, start, end, insertedLength) {
+  const safeStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0;
+  const safeEnd = Number.isFinite(end) ? Math.max(0, Math.floor(end)) : safeStart;
+  const from = Math.min(safeStart, safeEnd);
+  const to = Math.max(safeStart, safeEnd);
+  const added = Math.max(0, Number.isFinite(insertedLength) ? Math.floor(insertedLength) : 0);
+  const delta = added - (to - from);
+
+  return (Array.isArray(ranges) ? ranges : []).flatMap((range) => {
+    if (!range || !Number.isFinite(range.start) || !Number.isFinite(range.end)) return [];
+    const r = { ...range, start: Math.max(0, range.start), end: Math.max(0, range.end) };
+    if (r.end <= r.start) return [];
+
+    // A pure insertion uses non-sticky boundaries: text inserted exactly at
+    // either edge is not silently pulled into an existing annotation.
+    if (from === to) {
+      if (r.end <= from) return [r];
+      if (r.start >= from) return [{ ...r, start: r.start + added, end: r.end + added }];
+      return [{ ...r, end: r.end + added }];
+    }
+
+    if (r.end <= from) return [r];
+    if (r.start >= to) return [{ ...r, start: r.start + delta, end: r.end + delta }];
+
+    const next = {
+      ...r,
+      start: r.start < from ? r.start : from,
+      end: r.end > to ? r.end + delta : from + added,
+    };
+    return next.end > next.start ? [next] : [];
+  });
+}
+
+/** Split arbitrary offset ranges at `at`, rebasing the right-hand ranges. */
+export function splitOffsetRanges(ranges, at) {
   const left = [];
   const right = [];
-  for (const r of styles) {
-    if (r.end <= at) left.push({ ...r });
-    else if (r.start >= at) right.push({ ...r, start: r.start - at, end: r.end - at });
-    else {
-      left.push({ ...r, end: at });
-      right.push({ ...r, start: 0, end: r.end - at });
+  const offset = Math.max(0, at);
+  for (const range of Array.isArray(ranges) ? ranges : []) {
+    if (!range || !Number.isFinite(range.start) || !Number.isFinite(range.end)) continue;
+    if (range.end <= offset) left.push({ ...range });
+    else if (range.start >= offset) {
+      right.push({ ...range, start: range.start - offset, end: range.end - offset });
+    } else {
+      left.push({ ...range, end: offset });
+      right.push({ ...range, start: 0, end: range.end - offset });
     }
   }
   return [left, right];
+}
+
+/** Shift ranges from appended text into the target element's coordinate space. */
+export function appendOffsetRanges(left, right, offset) {
+  const shift = Math.max(0, offset);
+  return [
+    ...(Array.isArray(left) ? left.map((range) => ({ ...range })) : []),
+    ...(Array.isArray(right)
+      ? right.map((range) => ({ ...range, start: range.start + shift, end: range.end + shift }))
+      : []),
+  ];
+}
+
+/** Pure text replacement paired with arbitrary anchored ranges. */
+export function replaceTextWithRanges(text, ranges, start, end, replacement) {
+  const source = String(text ?? '');
+  const safeStart = Number.isFinite(start) ? Math.max(0, Math.floor(start)) : 0;
+  const safeEnd = Number.isFinite(end) ? Math.max(0, Math.floor(end)) : safeStart;
+  const from = Math.min(source.length, Math.min(safeStart, safeEnd));
+  const to = Math.min(source.length, Math.max(safeStart, safeEnd));
+  const inserted = String(replacement ?? '');
+  return {
+    text: source.slice(0, from) + inserted + source.slice(to),
+    ranges: adjustRangesForReplacement(ranges, from, to, inserted.length),
+  };
+}
+
+/** Split style ranges for an element cut at character offset `at`. */
+export function splitStyles(styles, at) {
+  return splitOffsetRanges(styles, at);
 }
 
 /** Attributes active at a character offset — drives toolbar button state. */

@@ -558,6 +558,51 @@ textarea {
   background: var(--panel-2);
 }
 
+/* Format Assistant */
+.format-summary {
+  margin: 0 0 5px;
+  font-weight: 650;
+}
+.format-empty {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ok) 8%, var(--panel));
+  color: var(--ok);
+  text-align: center;
+  font-weight: 600;
+}
+.format-issues {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+}
+.format-issue {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+.format-issue.error { border-left-color: var(--danger); }
+.format-issue.warning { border-left-color: #d58a1f; }
+.format-issue.info { border-left-color: var(--accent); }
+.format-issue-copy { flex: 1; min-width: 0; }
+.format-issue-level {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.format-issue-message { margin-top: 2px; }
+.format-issue-location { margin-top: 2px; color: var(--muted); font-size: 10.5px; }
+
 .field {
   margin-bottom: 13px;
 }

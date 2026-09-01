@@ -31,6 +31,7 @@ const MENU_CHANNELS = [
   'menu:italic',
   'menu:underline',
   'menu:dual',
+  'menu:format-assistant',
   'menu:element-settings',
   'menu:page-setup',
   'menu:scene-numbers',
