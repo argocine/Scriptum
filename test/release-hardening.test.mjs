@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { SaveCoordinator } from '../src/core/save-coordinator.js';
+import { isTopLevelArtifact } from '../tools/verify-package.mjs';
 
 const require = createRequire(import.meta.url);
 const { enqueueAtomicWrite } = require('../electron/atomic-write.cjs');
@@ -70,6 +71,12 @@ await t('file-association arguments accept only supported screenplay paths', () 
   assert.equal(openPathFromArguments(['--flag', '/tmp/Draft.SCRIPTUM']), path.resolve('/tmp/Draft.SCRIPTUM'));
   assert.equal(openPathFromArguments(['/tmp/readme.md', '/tmp/story.fountain']), path.resolve('/tmp/story.fountain'));
   assert.equal(openPathFromArguments(['--dev', '/tmp/malware.app']), null);
+});
+
+await t('package verification ignores executables inside unpacked build directories', () => {
+  const dist = path.resolve('/build/dist');
+  assert.equal(isTopLevelArtifact(path.join(dist, 'Scriptum-1.1.0-x64.exe'), dist), true);
+  assert.equal(isTopLevelArtifact(path.join(dist, 'win-unpacked', 'Scriptum.exe'), dist), false);
 });
 
 console.log(`\n${pass} release-hardening checks passed.`);
