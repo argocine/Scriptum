@@ -25,7 +25,9 @@ await t('atomic writes replace a document without leaving temporary files', asyn
     await fs.writeFile(target, 'old', { mode: 0o640 });
     await enqueueAtomicWrite(target, 'new', { encoding: 'utf8' });
     assert.equal(await fs.readFile(target, 'utf8'), 'new');
-    assert.equal((await fs.stat(target)).mode & 0o777, 0o640);
+    if (process.platform !== 'win32') {
+      assert.equal((await fs.stat(target)).mode & 0o777, 0o640);
+    }
     assert.deepEqual(await fs.readdir(directory), ['draft.scriptum']);
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
