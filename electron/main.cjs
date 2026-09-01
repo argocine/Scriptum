@@ -363,6 +363,8 @@ function buildMenu() {
         cmd('Unlock Pages', null, 'menu:unlock-pages'),
         { type: 'separator' },
         cmd('Mark Scene Omitted', null, 'menu:omit-scene'),
+        cmd('Tag Selection…', 'CmdOrCtrl+Alt+T', 'menu:production-tag'),
+        cmd('Toggle Production Tags', null, 'menu:toggle-production-tags'),
         cmd('Title Page…', null, 'menu:title-page'),
       ],
     },

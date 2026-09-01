@@ -40,6 +40,7 @@
           <button class="btn" id="tb-dual" title="Make this speech dual dialogue">Dual</button>
           <button class="btn" id="tb-alt" title="Store another version of this dialogue" aria-label="Add Alternate Dialogue">Alt</button>
           <button class="btn" id="tb-note" title="Add a note to this element">Note</button>
+          <button class="btn" id="tb-tag" title="Tag selected text for the production breakdown">Tag</button>
           <button class="btn" id="tb-omit" title="Mark scene omitted">Omit</button>
         </div>
         <div class="tb-sep"></div>
@@ -71,11 +72,13 @@
             <button class="side-tab active" id="tab-scenes" role="tab" aria-selected="true" aria-controls="pane-scenes" data-pane="scenes">Scenes</button>
             <button class="side-tab" id="tab-characters" role="tab" aria-selected="false" aria-controls="pane-characters" data-pane="characters">Characters</button>
             <button class="side-tab" id="tab-notes" role="tab" aria-selected="false" aria-controls="pane-notes" data-pane="notes">Notes</button>
+            <button class="side-tab" id="tab-breakdown" role="tab" aria-selected="false" aria-controls="pane-breakdown" data-pane="breakdown">Breakdown</button>
           </div>
           <div class="side-body">
             <div class="side-pane active" id="pane-scenes" role="tabpanel" aria-labelledby="tab-scenes"></div>
             <div class="side-pane" id="pane-characters" role="tabpanel" aria-labelledby="tab-characters"></div>
             <div class="side-pane" id="pane-notes" role="tabpanel" aria-labelledby="tab-notes"></div>
+            <div class="side-pane" id="pane-breakdown" role="tabpanel" aria-labelledby="tab-breakdown"></div>
           </div>
         </aside>
 

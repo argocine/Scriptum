@@ -32,6 +32,8 @@ const MENU_CHANNELS = [
   'menu:underline',
   'menu:dual',
   'menu:add-alternate',
+  'menu:production-tag',
+  'menu:toggle-production-tags',
   'menu:format-assistant',
   'menu:element-settings',
   'menu:page-setup',

@@ -5,7 +5,7 @@
  * even when it falls on a page the renderer has virtualized away.
  */
 
-import { normalizeStyles, replaceTextWithRanges } from '../core/model.js';
+import { replaceElementText } from '../core/model.js';
 import { ELEMENT_LABEL } from '../core/format.js';
 
 export class Finder {
@@ -88,9 +88,7 @@ export class Finder {
     this.editor.commit(() => {
       const el = this.editor.doc.elements.find((e) => e.id === m.elementId);
       if (!el) return null;
-      const changed = replaceTextWithRanges(el.text, el.styles, m.start, m.end, replacement);
-      el.text = changed.text;
-      el.styles = normalizeStyles(changed.ranges, el.text.length);
+      replaceElementText(el, m.start, m.end, replacement);
       this.editor.markRevised(el);
       return { elementId: el.id, offset: m.start + replacement.length };
     }, { rebuildVocab: true });
@@ -111,9 +109,7 @@ export class Finder {
         const m = this.matches[i];
         const el = this.editor.doc.elements.find((e) => e.id === m.elementId);
         if (!el) continue;
-        const changed = replaceTextWithRanges(el.text, el.styles, m.start, m.end, replacement);
-        el.text = changed.text;
-        el.styles = normalizeStyles(changed.ranges, el.text.length);
+        replaceElementText(el, m.start, m.end, replacement);
         this.editor.markRevised(el);
       }
       return null;

@@ -24,6 +24,11 @@ import {
   nextTypeOnTab,
   normalizeStyles,
   splitStyles,
+  splitOffsetRanges,
+  appendOffsetRanges,
+  replaceElementText,
+  replaceTextWithRanges,
+  textReplacementDifference,
   stylesAt,
   countWords,
   touch,
@@ -37,6 +42,7 @@ import {
   hasAlternateDialogue,
   stepAlternate,
 } from '../core/alternates.js';
+import { mergeTagRanges } from '../core/production.js';
 
 const GUTTER_SELECTOR = '.scene-num, .revision-mark, .note-flag, .alt-controls';
 const TYPING_COALESCE_MS = 600;
@@ -418,8 +424,17 @@ export class ScriptEditor {
     const el = getElement(this.doc, elementId);
     if (!el) return null;
     const { text, styles } = this.readElementFromDOM(elementId);
+    const edit = textReplacementDifference(el.text, text);
+    const tagChange = replaceTextWithRanges(
+      el.text,
+      el.tags,
+      edit.start,
+      edit.end,
+      edit.replacement
+    );
     el.text = text;
     el.styles = normalizeStyles(styles, text.length);
+    el.tags = tagChange.ranges;
     this.markRevised(el);
     return el;
   }
@@ -512,9 +527,15 @@ export class ScriptEditor {
 
       // Mid-text split keeps the same type on both halves.
       const [ls, rs] = splitStyles(el.styles, offset);
-      const rest = createElement(el.type, el.text.slice(offset), { styles: rs, dual: el.dual });
+      const [lt, rt] = splitOffsetRanges(el.tags, offset);
+      const rest = createElement(el.type, el.text.slice(offset), {
+        styles: rs,
+        tags: rt,
+        dual: el.dual,
+      });
       el.text = el.text.slice(0, offset);
       el.styles = ls;
+      el.tags = lt;
       this.markRevised(el);
       this.markRevised(rest);
       this.doc.elements.splice(idx + 1, 0, rest);
@@ -594,6 +615,7 @@ export class ScriptEditor {
         [...prev.styles, ...el.styles.map((s) => ({ ...s, start: s.start + at, end: s.end + at }))],
         prev.text.length
       );
+      prev.tags = mergeTagRanges(appendOffsetRanges(prev.tags, el.tags, at));
       this.markRevised(prev);
       this.doc.elements.splice(idx, 1);
       return { elementId: prev.id, offset: at };
@@ -623,6 +645,7 @@ export class ScriptEditor {
         [...el.styles, ...next.styles.map((s) => ({ ...s, start: s.start + at, end: s.end + at }))],
         el.text.length
       );
+      el.tags = mergeTagRanges(appendOffsetRanges(el.tags, next.tags, at));
       this.markRevised(el);
       this.doc.elements.splice(idx + 1, 1);
       return { elementId: el.id, offset: at };
@@ -637,19 +660,15 @@ export class ScriptEditor {
     if (!first || !last) return null;
 
     if (startIndex === endIndex) {
-      const [ls] = splitStyles(first.styles, start.offset);
-      const [, rs] = splitStyles(first.styles, end.offset);
-      first.text = first.text.slice(0, start.offset) + first.text.slice(end.offset);
-      first.styles = normalizeStyles(
-        [...ls, ...rs.map((s) => ({ ...s, start: s.start + start.offset, end: s.end + start.offset }))],
-        first.text.length
-      );
+      replaceElementText(first, start.offset, end.offset, '');
       this.markRevised(first);
       return { elementId: first.id, offset: start.offset };
     }
 
     const [headStyles] = splitStyles(first.styles, start.offset);
     const [, tailStyles] = splitStyles(last.styles, end.offset);
+    const [headTags] = splitOffsetRanges(first.tags, start.offset);
+    const [, tailTags] = splitOffsetRanges(last.tags, end.offset);
     const head = first.text.slice(0, start.offset);
     const tail = last.text.slice(end.offset);
 
@@ -661,6 +680,7 @@ export class ScriptEditor {
       ],
       first.text.length
     );
+    first.tags = mergeTagRanges(appendOffsetRanges(headTags, tailTags, head.length));
     this.markRevised(first);
     this.doc.elements.splice(startIndex + 1, endIndex - startIndex);
     return { elementId: first.id, offset: head.length };
@@ -689,6 +709,10 @@ export class ScriptEditor {
       this.alternateNotice('Alternate dialogue is not available inside a dual-dialogue pair.');
       return false;
     }
+    if (element.tags?.length) {
+      this.alternateNotice('Remove production tags from this dialogue before adding stored alternatives.');
+      return false;
+    }
     this.commit(() => {
       addAlternate(element);
       this.markRevised(element);
@@ -700,6 +724,10 @@ export class ScriptEditor {
   stepAlternateDialogue(elementId, direction) {
     const element = getElement(this.doc, elementId);
     if (!hasAlternateDialogue(element)) return false;
+    if (element.tags?.length) {
+      this.alternateNotice('Remove production tags before switching stored dialogue alternatives.');
+      return false;
+    }
     this.commit(() => {
       stepAlternate(element, direction);
       return { elementId: element.id, offset: Math.min(element.text.length, 0) };
@@ -710,6 +738,10 @@ export class ScriptEditor {
   deleteActiveAlternateDialogue(elementId) {
     const element = getElement(this.doc, elementId);
     if (!hasAlternateDialogue(element)) return false;
+    if (element.tags?.length) {
+      this.alternateNotice('Remove production tags before removing stored dialogue alternatives.');
+      return false;
+    }
     this.commit(() => {
       deleteActiveAlternate(element);
       return { elementId: element.id, offset: 0 };
@@ -803,12 +835,19 @@ export class ScriptEditor {
     // A single line pastes as plain text into the current element.
     if (lines.length === 1) {
       this.commit(() => {
+        if (!sel.collapsed && sel.startIndex === sel.endIndex) {
+          const el = getElement(this.doc, sel.start.elementId);
+          if (!el) return null;
+          replaceElementText(el, sel.start.offset, sel.end.offset, lines[0]);
+          this.markRevised(el);
+          return { elementId: el.id, offset: sel.start.offset + lines[0].length };
+        }
         const caret = sel.collapsed
           ? { elementId: sel.start.elementId, offset: sel.start.offset }
           : this.deleteRangeInModel(sel);
         if (!caret) return null;
         const el = getElement(this.doc, caret.elementId);
-        el.text = el.text.slice(0, caret.offset) + lines[0] + el.text.slice(caret.offset);
+        replaceElementText(el, caret.offset, caret.offset, lines[0]);
         this.markRevised(el);
         return { elementId: el.id, offset: caret.offset + lines[0].length };
       }, { rebuildVocab: true });
@@ -834,12 +873,14 @@ export class ScriptEditor {
       const idx = indexOfElement(this.doc, caret.elementId);
       const host = this.doc.elements[idx];
       const tailText = host.text.slice(caret.offset);
-      const [hostStyles] = splitStyles(host.styles, caret.offset);
+      const [hostStyles, tailStyles] = splitStyles(host.styles, caret.offset);
+      const [hostTags, tailTags] = splitOffsetRanges(host.tags, caret.offset);
       host.text = host.text.slice(0, caret.offset) + lines[0];
       host.styles = normalizeStyles(hostStyles, host.text.length);
+      host.tags = hostTags;
 
       const created = inferElements(lines.slice(1), host.type);
-      if (tailText) created.push(createElement(host.type, tailText));
+      if (tailText) created.push(createElement(host.type, tailText, { styles: tailStyles, tags: tailTags }));
       this.doc.elements.splice(idx + 1, 0, ...created);
       created.forEach((el) => this.markRevised(el));
 
@@ -875,9 +916,11 @@ export class ScriptEditor {
       const idx = indexOfElement(this.doc, caret.elementId);
       const host = this.doc.elements[idx];
       const tail = host.text.slice(caret.offset);
-      const [hostStyles] = splitStyles(host.styles, caret.offset);
+      const [hostStyles, tailStyles] = splitStyles(host.styles, caret.offset);
+      const [hostTags, tailTags] = splitOffsetRanges(host.tags, caret.offset);
       host.text = host.text.slice(0, caret.offset) + lines[0];
       host.styles = normalizeStyles(hostStyles, host.text.length);
+      host.tags = hostTags;
       this.markRevised(host);
 
       // The remaining lines continue the natural element flow rather than
@@ -892,7 +935,7 @@ export class ScriptEditor {
         prevType = detectType(line, type) || type;
         el.type = prevType;
       }
-      if (tail) created.push(createElement(host.type, tail));
+      if (tail) created.push(createElement(host.type, tail, { styles: tailStyles, tags: tailTags }));
 
       this.doc.elements.splice(idx + 1, 0, ...created);
       const last = created[created.length - 1] || host;
@@ -976,8 +1019,7 @@ export class ScriptEditor {
     this.commit(() => {
       const el = getElement(this.doc, elementId);
       if (!el) return null;
-      el.text = el.text.slice(0, replaceFrom) + item.value;
-      el.styles = normalizeStyles(el.styles, el.text.length);
+      replaceElementText(el, replaceFrom, el.text.length, item.value);
       this.markRevised(el);
       return { elementId, offset: el.text.length };
     }, { rebuildVocab: true });
@@ -1060,6 +1102,15 @@ export class ScriptEditor {
     if (!sel || sel.collapsed) return;
     if (sel.startIndex === sel.endIndex) return;
 
+    if (e.inputType === 'deleteByDrag' || e.inputType === 'insertFromDrop') {
+      e.preventDefault();
+      this.emit({
+        viewOnly: true,
+        notice: 'Drag-and-drop text within one screenplay element; use cut and paste across elements.',
+      });
+      return;
+    }
+
     const destructive = [
       'insertText',
       'insertCompositionText',
@@ -1088,7 +1139,7 @@ export class ScriptEditor {
       if (!caret) return null;
       if (inserted) {
         const el = getElement(this.doc, caret.elementId);
-        el.text = el.text.slice(0, caret.offset) + inserted + el.text.slice(caret.offset);
+        replaceElementText(el, caret.offset, caret.offset, inserted);
         return { elementId: el.id, offset: caret.offset + inserted.length };
       }
       return caret;
@@ -1100,6 +1151,15 @@ export class ScriptEditor {
     // Space, and arrow-key behavior remain native instead of treating them as
     // screenplay-editing commands.
     if (e.target.closest?.('.alt-controls')) return;
+    const focusedTag = e.target.closest?.('.production-tag');
+    if (focusedTag && document.activeElement === focusedTag) {
+      if (e.key === 'Tab') return;
+      e.preventDefault();
+      if (e.key === 'Enter' || e.key === ' ') {
+        this.emit({ viewOnly: true, notice: focusedTag.title });
+      }
+      return;
+    }
 
     const meta = e.metaKey || e.ctrlKey;
 

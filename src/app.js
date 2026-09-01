@@ -17,9 +17,12 @@ import { parseFDX, toFDX } from './io/fdx.js';
 import { exportPDF } from './io/pdf.js';
 import { pdfSupportIssues } from './features/format-assistant.js';
 import { documentHasAlternates, hasAlternateDialogue } from './core/alternates.js';
+import { documentHasProductionTags } from './core/production.js';
+import { breakdownReport } from './features/reports.js';
 import {
   serializeProject,
   parseProject,
+  normalizeDocument,
   toPlainText,
   writeAutosave,
   readAutosave,
@@ -33,6 +36,7 @@ import {
   revisionsDialog,
   reportsDialog,
   formatAssistantDialog,
+  productionTagDialog,
   notesDialog,
   gotoSceneDialog,
   pageLockDialog,
@@ -138,6 +142,7 @@ const dom = {
   paneScenes: document.getElementById('pane-scenes'),
   paneCharacters: document.getElementById('pane-characters'),
   paneNotes: document.getElementById('pane-notes'),
+  paneBreakdown: document.getElementById('pane-breakdown'),
   cardsView: document.getElementById('cards-view'),
   cardGrid: document.getElementById('card-grid'),
   findbar: document.getElementById('findbar'),
@@ -225,7 +230,7 @@ async function offerRecovery(recovered) {
     buttons: ['Recover', 'Discard'],
   });
   if (choice === 0) {
-    editor.load(recovered.document);
+    editor.load(normalizeDocument(recovered.document));
     state.filePath = recovered.filePath;
     markDirty();
     toast('Recovered your last autosave.');
@@ -265,6 +270,7 @@ function wireToolbar() {
     const el = editor.currentElement();
     if (el) notesDialog(editor, el.id);
   });
+  on('tb-tag', () => productionTagDialog(editor, { toast }));
   on('tb-omit', omitScene);
   on('tb-cards', toggleCards);
   on('tb-find', openFind);
@@ -422,6 +428,8 @@ function wireMenus() {
   m('menu:underline', () => editor.toggleStyle('underline'));
   m('menu:dual', toggleDualDialogue);
   m('menu:add-alternate', () => editor.addAlternateDialogue());
+  m('menu:production-tag', () => productionTagDialog(editor, { toast }));
+  m('menu:toggle-production-tags', toggleProductionTags);
 
   for (const type of ELEMENT_ORDER) {
     m(`menu:type-${type}`, () => editor.setElementType(type));
@@ -610,14 +618,20 @@ async function exportText(text, kind) {
 }
 
 async function exportInterchangeWithAlternates(kind, buildText) {
-  if (documentHasAlternates(editor.doc)) {
+  const hasAlternates = documentHasAlternates(editor.doc);
+  const hasTags = documentHasProductionTags(editor.doc);
+  if (hasAlternates || hasTags) {
     const label = kind === 'fdx' ? 'Final Draft' : 'Fountain';
+    const omissions = [
+      hasAlternates ? 'inactive dialogue alternatives' : '',
+      hasTags ? 'production tags' : '',
+    ].filter(Boolean).join(' and ');
     const choice = await platform.confirm({
-      message: `Export the selected dialogue choices to ${label}?`,
+      message: `Export screenplay text to ${label}?`,
       detail:
-        `${label} export currently includes only the active version of each dialogue. ` +
-        'Inactive Scriptum alternatives remain safe in the .scriptum file.',
-      buttons: ['Export Active Choices', 'Cancel'],
+        `${label} export does not carry ${omissions}. ` +
+        'That information remains safe in the .scriptum file.',
+      buttons: ['Export Screenplay Text', 'Cancel'],
       defaultId: 1,
     });
     if (choice !== 0) return;
@@ -783,6 +797,15 @@ function omitScene() {
   });
   editor.hardRender(null);
   markDirty();
+}
+
+function toggleProductionTags() {
+  editor.commit(() => {
+    editor.doc.production.showTags = !editor.doc.production.showTags;
+    return null;
+  });
+  editor.hardRender(null);
+  toast(editor.doc.production.showTags ? 'Production tags shown.' : 'Production tags hidden.');
 }
 
 function jumpToScene(sceneId) {
@@ -961,7 +984,8 @@ function refreshSidebar() {
   const activePane = document.querySelector('.side-pane.active')?.id;
   if (activePane === 'pane-scenes') renderScenePane();
   else if (activePane === 'pane-characters') renderCharacterPane();
-  else renderNotesPane();
+  else if (activePane === 'pane-notes') renderNotesPane();
+  else renderBreakdownPane();
   if (state.cardsOpen) board.render();
 }
 
@@ -1075,6 +1099,38 @@ function renderNotesPane() {
         )
       );
     }
+  }
+}
+
+function renderBreakdownPane() {
+  const pane = dom.paneBreakdown;
+  pane.innerHTML = '';
+  const rows = breakdownReport(editor.doc, editor.pagination);
+  if (!rows.length) {
+    pane.appendChild(
+      h('div', { class: 'side-empty' }, 'No production tags yet. Select screenplay text and press ', h('b', {}, 'Tag'), '.')
+    );
+    return;
+  }
+  for (const row of rows) {
+    const rowTag = row.sceneId ? 'button' : 'div';
+    const rowProps = row.sceneId
+      ? { type: 'button', class: 'nav-scene', onClick: () => jumpToScene(row.sceneId) }
+      : { class: 'nav-scene', 'aria-label': `Unassigned production item ${row.item}` };
+    pane.appendChild(
+      h(
+        rowTag,
+        rowProps,
+        h(
+          'div',
+          { class: 'h' },
+          h('span', { class: 'swatch', style: { background: row.color } }),
+          h('span', { class: 'n' }, row.scene),
+          h('span', { class: 't' }, row.item)
+        ),
+        h('div', { class: 'meta' }, h('span', {}, row.category), h('span', {}, `${row.count} occurrence${row.count === 1 ? '' : 's'}`))
+      )
+    );
   }
 }
 

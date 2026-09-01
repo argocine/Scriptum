@@ -287,6 +287,17 @@
   text-align: center;
 }
 
+/* Production tags are editor-only annotations; screenplay text remains plain. */
+.production-tag {
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--tag-color) 24%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--tag-color) 80%, transparent);
+}
+.production-tag:focus-visible {
+  outline: 2px solid var(--tag-color);
+  outline-offset: 1px;
+}
+
 /* Highlight for find results and the current scene. */
 .hl-find {
   background: #ffe27a;
@@ -378,6 +389,15 @@
     break-after: page;
     border-radius: 0;
   }
+  .page-tab,
+  .note-flag,
+  .alt-controls,
+  .production-tag,
+  .el.scene-active::before {
+    box-shadow: none !important;
+    background: transparent !important;
+  }
+
   .page-tab,
   .note-flag,
   .alt-controls,

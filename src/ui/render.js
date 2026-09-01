@@ -15,6 +15,7 @@
 
 import { ElementType, SCREEN_DPI, SCREEN_CHAR_PX, SCREEN_LINE_PX } from '../core/format.js';
 import { alternateStatus, hasAlternateDialogue } from '../core/alternates.js';
+import { productionLookup } from '../core/production.js';
 
 const VIRTUAL_WINDOW = 4; // pages rendered on each side of the viewport
 const VIRTUAL_MIN = 12; // scripts shorter than this are never virtualized
@@ -151,6 +152,48 @@ function appendStyledText(host, text, styles) {
   if (pos < text.length) host.appendChild(document.createTextNode(text.slice(pos)));
 }
 
+function appendAnnotatedText(host, text, styles, tags, registry) {
+  if (!registry?.showTags || !tags?.length) {
+    appendStyledText(host, text, styles);
+    return;
+  }
+  const lookup = productionLookup(registry);
+  const boundaries = new Set([0, text.length]);
+  for (const tag of tags) {
+    boundaries.add(Math.max(0, Math.min(text.length, tag.start)));
+    boundaries.add(Math.max(0, Math.min(text.length, tag.end)));
+  }
+  const points = [...boundaries].sort((a, b) => a - b);
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const start = points[i];
+    const end = points[i + 1];
+    if (end <= start) continue;
+    const active = tags.filter((tag) => tag.start <= start && tag.end >= end);
+    const target = active.length ? document.createElement('span') : host;
+    if (active.length) {
+      const details = active.flatMap((tag) => {
+        const item = lookup.items.get(tag.itemId);
+        const category = item ? lookup.categories.get(item.categoryId) : null;
+        return item && category ? [{ item, category }] : [];
+      });
+      if (details.length) {
+        target.className = 'production-tag';
+        target.style.setProperty('--tag-color', details[0].category.color);
+        target.title = details.map(({ item, category }) => `${category.name}: ${item.name}`).join('\n');
+        target.dataset.tagItems = details.map(({ item }) => item.id).join(' ');
+        target.setAttribute('role', 'mark');
+        target.tabIndex = 0;
+        target.setAttribute(
+          'aria-label',
+          `Production tag ${target.title.replace(/\n/g, ', ')}: ${text.slice(start, end)}`
+        );
+      }
+    }
+    appendStyledText(target, text.slice(start, end), sliceStyles(styles, start, end));
+    if (target !== host) host.appendChild(target);
+  }
+}
+
 function wrap(tag, node) {
   const el = document.createElement(tag);
   el.appendChild(node);
@@ -271,7 +314,13 @@ export function buildPage(page, pageIndex, doc, styles, ctx) {
     if (spec.underline) div.style.textDecoration = 'underline';
 
     const text = model.text.slice(it.charStart, it.charEnd);
-    appendStyledText(div, text, sliceStyles(model.styles, it.charStart, it.charEnd));
+    appendAnnotatedText(
+      div,
+      text,
+      sliceStyles(model.styles, it.charStart, it.charEnd),
+      sliceStyles(model.tags, it.charStart, it.charEnd),
+      doc.production
+    );
 
     // Gutter marks are positioned relative to this element's own left margin.
     const offsetPx = (absoluteIn) => (absoluteIn - spec.left) * SCREEN_DPI;

@@ -9,6 +9,7 @@
 import { ElementType, ELEMENT_ORDER, applyCase } from '../core/format.js';
 import { createDocument, createElement, normalizeStyles } from '../core/model.js';
 import { normalizeAlternateDialogue } from '../core/alternates.js';
+import { normalizeElementTags, normalizeProductionRegistry } from '../core/production.js';
 
 const FORMAT = 'scriptum-screenplay';
 const FORMAT_VERSION = 1;
@@ -24,6 +25,15 @@ export function serializeProject(doc) {
     null,
     2
   )}\n`;
+}
+
+/** Apply the same defensive hydration used for files to an in-memory recovery copy. */
+export function normalizeDocument(doc) {
+  return parseProject(JSON.stringify({
+    format: FORMAT,
+    formatVersion: FORMAT_VERSION,
+    document: doc,
+  }));
 }
 
 export function parseProject(json) {
@@ -58,6 +68,7 @@ export function parseProject(json) {
   const revisions = isRecord(d.revisions) ? d.revisions : {};
   const pageLock = isRecord(d.pageLock) ? d.pageLock : {};
   const meta = isRecord(d.meta) ? d.meta : {};
+  const production = normalizeProductionRegistry(d.production);
   const seenIds = new Set();
 
   const doc = {
@@ -116,6 +127,7 @@ export function parseProject(json) {
         : [],
     },
     meta: { ...base.meta, ...meta },
+    production,
     styleOverrides: isRecord(d.styleOverrides) ? d.styleOverrides : {},
     pageOverrides: isRecord(d.pageOverrides) ? d.pageOverrides : {},
     elements: (Array.isArray(d.elements) ? d.elements : []).filter(isRecord).map((e) => {
@@ -135,7 +147,7 @@ export function parseProject(json) {
               text: typeof note.text === 'string' ? note.text : '',
             }))
           : [],
-        tags: Array.isArray(e.tags) ? e.tags.filter(isRecord) : [],
+        tags: normalizeElementTags(e.tags, text.length, production),
       };
       element.sceneNumber =
         typeof e.sceneNumber === 'string' && e.sceneNumber ? e.sceneNumber : null;

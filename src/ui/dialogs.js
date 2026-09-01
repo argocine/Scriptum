@@ -30,8 +30,16 @@ import {
   SCENE_COLUMNS,
   CHARACTER_COLUMNS,
   LOCATION_COLUMNS,
+  breakdownReport,
+  BREAKDOWN_COLUMNS,
 } from '../features/reports.js';
 import { auditDocument } from '../features/format-assistant.js';
+import {
+  addProductionCategory,
+  applyProductionTag,
+  ensureProductionItem,
+  removeProductionTags,
+} from '../core/production.js';
 
 /* ------------------------------------------------------------------ *
  * Tiny DOM builder
@@ -705,6 +713,180 @@ export function formatAssistantDialog(editor, { onGoTo } = {}) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Production tags
+ * ------------------------------------------------------------------ */
+
+export function productionTagDialog(editor, { toast } = {}) {
+  const selection = editor.getSelection();
+  if (!selection || selection.collapsed) {
+    editor.emit({ viewOnly: true, notice: 'Select screenplay text before applying a production tag.' });
+    return false;
+  }
+  const selectedElements = editor.doc.elements.slice(selection.startIndex, selection.endIndex + 1);
+  const touchesAlternates = selectedElements.some((element) => element.alternateDialogue);
+
+  const registry = JSON.parse(JSON.stringify(editor.doc.production));
+  let categoryId = registry.categories[0]?.id || '';
+  let itemId = '';
+  let itemName = '';
+
+  const categorySelect = h('select', { 'aria-label': 'Production category' });
+  const itemSelect = h('select', { 'aria-label': 'Existing breakdown item' });
+  const itemInput = textInput('', (value) => {
+    itemName = value;
+    if (value.trim()) {
+      itemId = '';
+      itemSelect.value = '';
+    }
+  }, {
+    placeholder: 'Or name a new item…',
+    maxlength: '120',
+  });
+  const showTags = h('input', { type: 'checkbox' });
+  showTags.checked = registry.showTags;
+
+  const refreshCategories = () => {
+    categorySelect.innerHTML = '';
+    for (const category of registry.categories) {
+      categorySelect.appendChild(
+        h('option', { value: category.id, selected: category.id === categoryId }, category.name)
+      );
+    }
+  };
+  const refreshItems = () => {
+    const items = registry.items.filter((item) => item.categoryId === categoryId);
+    itemSelect.innerHTML = '';
+    itemSelect.appendChild(h('option', { value: '' }, items.length ? 'Choose an existing item…' : 'No items in this category yet'));
+    for (const item of items) itemSelect.appendChild(h('option', { value: item.id }, item.name));
+    itemSelect.value = items.some((item) => item.id === itemId) ? itemId : '';
+    itemId = itemSelect.value;
+  };
+  categorySelect.addEventListener('change', () => {
+    categoryId = categorySelect.value;
+    itemId = '';
+    refreshItems();
+  });
+  itemSelect.addEventListener('change', () => {
+    itemId = itemSelect.value;
+    if (itemId) {
+      itemName = '';
+      itemInput.value = '';
+    }
+  });
+  refreshCategories();
+  refreshItems();
+
+  const categoryName = textInput('', () => {}, { placeholder: 'New category name', maxlength: '120' });
+  const categoryColor = h('input', { type: 'color', value: '#78909c', 'aria-label': 'New category colour' });
+  const categoryBuilder = h(
+    'div',
+    { class: 'row' },
+    categoryName,
+    categoryColor,
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const category = addProductionCategory(registry, categoryName.value, categoryColor.value);
+          if (!category) return;
+          categoryId = category.id;
+          categoryName.value = '';
+          refreshCategories();
+          categorySelect.value = categoryId;
+          refreshItems();
+        },
+      },
+      'Add category'
+    )
+  );
+
+  const excerpt = selectedElements
+    .map((element, offset) => {
+      const index = selection.startIndex + offset;
+      const from = index === selection.startIndex ? selection.start.offset : 0;
+      const to = index === selection.endIndex ? selection.end.offset : element.text.length;
+      return element.text.slice(from, to);
+    })
+    .join(' ')
+    .trim();
+
+  const body = h(
+    'div',
+    {},
+    h('p', { class: 'hint' }, `Selected: “${excerpt.slice(0, 180)}${excerpt.length > 180 ? '…' : ''}”`),
+    field('Category', categorySelect),
+    field('Existing item', itemSelect),
+    field('New item', itemInput, 'A prop might be “silver lighter”; a cast item might be “Mara”.'),
+    h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Custom category'), categoryBuilder),
+    h('label', { class: 'check' }, showTags, 'Show coloured production tags in the editor')
+  );
+
+  const selectedBounds = (element, index) => ({
+    from: index === selection.startIndex ? selection.start.offset : 0,
+    to: index === selection.endIndex ? selection.end.offset : element.text.length,
+  });
+
+  openDialog({
+    title: 'Production Tag',
+    body,
+    wide: true,
+    buttons: [
+      {
+        label: 'Remove Tags',
+        onClick: () => {
+          let count = 0;
+          editor.commit(() => {
+            editor.doc.production = registry;
+            editor.doc.production.showTags = showTags.checked;
+            for (let i = selection.startIndex; i <= selection.endIndex; i += 1) {
+              const element = editor.doc.elements[i];
+              const { from, to } = selectedBounds(element, i);
+              count += removeProductionTags(element, from, to);
+            }
+            return null;
+          });
+          editor.hardRender(null);
+          toast?.(count ? `Removed ${count} production tag${count === 1 ? '' : 's'}.` : 'No tags crossed that selection.');
+        },
+      },
+      { label: 'Cancel' },
+      {
+        label: 'Apply Tag',
+        primary: true,
+        onClick: () => {
+          if (touchesAlternates) {
+            toast?.('Production tags cannot be added to dialogue with stored alternatives.');
+            return true;
+          }
+          const chosen = registry.items.find((item) => item.id === itemId) ||
+            ensureProductionItem(registry, categoryId, itemName);
+          if (!chosen) {
+            toast?.('Choose an existing item or enter a new item name.');
+            return true;
+          }
+          let count = 0;
+          editor.commit(() => {
+            editor.doc.production = registry;
+            editor.doc.production.showTags = showTags.checked;
+            for (let i = selection.startIndex; i <= selection.endIndex; i += 1) {
+              const element = editor.doc.elements[i];
+              const { from, to } = selectedBounds(element, i);
+              if (applyProductionTag(element, chosen.id, from, to)) count += 1;
+            }
+            return null;
+          });
+          editor.hardRender(null);
+          toast?.(`Tagged ${count} screenplay element${count === 1 ? '' : 's'} as ${chosen.name}.`);
+        },
+      },
+    ],
+  });
+  return true;
+}
+
+/* ------------------------------------------------------------------ *
  * Reports
  * ------------------------------------------------------------------ */
 
@@ -713,7 +895,7 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
   const pagination = editor.pagination;
   const styles = editor.styles;
 
-  const tabs = ['Summary', 'Scenes', 'Characters', 'Locations'];
+  const tabs = ['Summary', 'Scenes', 'Characters', 'Locations', 'Breakdown'];
   let active = 'Summary';
 
   const content = h('div', {});
@@ -732,8 +914,12 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
       );
     } else if (active === 'Characters') {
       content.appendChild(characterPane(characterReport(doc, pagination)));
-    } else {
+    } else if (active === 'Locations') {
       content.appendChild(table(locationReport(doc, pagination), LOCATION_COLUMNS));
+    } else {
+      content.appendChild(
+        table(breakdownReport(doc, pagination), BREAKDOWN_COLUMNS, (row) => onJumpToScene?.(row.sceneId))
+      );
     }
   };
 
@@ -768,6 +954,7 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
             Scenes: [sceneReport(doc, pagination, styles), SCENE_COLUMNS, 'scenes'],
             Characters: [characterReport(doc, pagination), CHARACTER_COLUMNS, 'characters'],
             Locations: [locationReport(doc, pagination), LOCATION_COLUMNS, 'locations'],
+            Breakdown: [breakdownReport(doc, pagination), BREAKDOWN_COLUMNS, 'breakdown'],
           };
           const entry = map[active];
           if (!entry) return true; // Summary has nothing tabular to export

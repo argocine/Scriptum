@@ -14,6 +14,7 @@ import {
   baseCharacterName,
   countWords,
 } from '../core/model.js';
+import { productionLookup } from '../core/production.js';
 
 /** Map every element to the page number it starts on. */
 function pageOfElement(pagination) {
@@ -160,6 +161,55 @@ export function locationReport(doc, pagination) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Production breakdown
+ * ------------------------------------------------------------------ */
+
+export function breakdownReport(doc, pagination) {
+  const pageMap = pageOfElement(pagination);
+  const lookup = productionLookup(doc.production);
+  const scenes = getScenes(doc);
+  const sceneByElement = new Map();
+  for (const scene of scenes) {
+    for (const element of scene.elements) sceneByElement.set(element.id, scene);
+  }
+  const grouped = new Map();
+  for (const element of doc.elements) {
+    const scene = sceneByElement.get(element.id) || null;
+    for (const tag of element.tags || []) {
+      const item = lookup.items.get(tag.itemId);
+      const category = item ? lookup.categories.get(item.categoryId) : null;
+      if (!item || !category) continue;
+      const key = `${scene?.id || 'unassigned'}:${item.id}`;
+      const row = grouped.get(key) || {
+        sceneId: scene?.id || null,
+        scene: scene ? scene.sceneNumber || String(scene.index + 1) : '—',
+        page: pageMap.get(scene?.id || element.id) || '',
+        heading: scene?.heading || 'Before first scene',
+        category: category.name,
+        categoryId: category.id,
+        color: category.color,
+        item: item.name,
+        itemId: item.id,
+        count: 0,
+        excerpts: [],
+      };
+      row.count += 1;
+      const excerpt = element.text.slice(tag.start, tag.end).trim();
+      if (excerpt && !row.excerpts.includes(excerpt)) row.excerpts.push(excerpt);
+      grouped.set(key, row);
+    }
+  }
+  const rows = [...grouped.values()];
+  return rows.sort(
+    (a, b) =>
+      Number(a.scene) - Number(b.scene) ||
+      String(a.scene).localeCompare(String(b.scene)) ||
+      a.category.localeCompare(b.category) ||
+      a.item.localeCompare(b.item)
+  );
+}
+
+/* ------------------------------------------------------------------ *
  * Overall statistics
  * ------------------------------------------------------------------ */
 
@@ -220,9 +270,11 @@ export function toCSV(rows, columns) {
 }
 
 function format(v) {
-  if (Array.isArray(v)) return v.join('; ');
   if (typeof v === 'number') return String(v);
-  return v ?? '';
+  const text = String(Array.isArray(v) ? v.join('; ') : v ?? '');
+  // Spreadsheet applications interpret these prefixes as formulas. CSV is a
+  // data interchange format, so neutralize user-authored cells before export.
+  return /^[\t\r ]*[=+\-@]/.test(text) ? `'${text}` : text;
 }
 
 function quote(s) {
@@ -255,4 +307,14 @@ export const LOCATION_COLUMNS = [
   { label: 'Interior', get: (r) => r.interior },
   { label: 'Exterior', get: (r) => r.exterior },
   { label: 'Times', get: (r) => r.times },
+];
+
+export const BREAKDOWN_COLUMNS = [
+  { label: 'Scene', get: (r) => r.scene },
+  { label: 'Page', get: (r) => r.page },
+  { label: 'Heading', get: (r) => r.heading },
+  { label: 'Category', get: (r) => r.category },
+  { label: 'Item', get: (r) => r.item },
+  { label: 'Occurrences', get: (r) => r.count },
+  { label: 'Tagged Text', get: (r) => r.excerpts },
 ];

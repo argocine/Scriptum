@@ -7,7 +7,7 @@
  */
 
 import { ElementType } from '../core/format.js';
-import { getScenes } from '../core/model.js';
+import { getScenes, replaceElementTextByDiff } from '../core/model.js';
 
 export const CARD_COLORS = [
   { name: 'None', value: null },
@@ -74,7 +74,7 @@ export class CardBoard {
       if (text === scene.heading) return;
       this.editor.commit(() => {
         const el = this.editor.doc.elements.find((e) => e.id === scene.id);
-        if (el) el.text = text;
+        if (el) replaceElementTextByDiff(el, text);
         return null;
       }, { rebuildVocab: true });
       this.render();

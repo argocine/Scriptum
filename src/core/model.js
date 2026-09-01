@@ -11,6 +11,7 @@
  */
 
 import { ElementType } from './format.js';
+import { createProductionRegistry, mergeTagRanges } from './production.js';
 
 let idCounter = 0;
 export function newId(prefix = 'e') {
@@ -38,7 +39,7 @@ export function createElement(type = ElementType.ACTION, text = '', extra = {}) 
     revisionId: null, // which revision set last touched this element
     dual: null, // null | 'left' | 'right'
     notes: [], // {id, text, color, author, created}
-    tags: [], // {category, value} — production tagging
+    tags: [], // {id, itemId, start, end} — production breakdown ranges
     alternateDialogue: null,
     omitted: false,
     ...extra,
@@ -79,6 +80,7 @@ export function createDocument(overrides = {}) {
       anchors: [], // {page: '12', elementId} captured at lock time
     },
     characters: {}, // name -> {name, count, extension}
+    production: createProductionRegistry(),
     meta: {
       created: new Date().toISOString(),
       modified: new Date().toISOString(),
@@ -493,6 +495,39 @@ export function replaceTextWithRanges(text, ranges, start, end, replacement) {
   };
 }
 
+/** Replace text while keeping both emphasis and production tags anchored. */
+export function replaceElementText(element, start, end, replacement) {
+  if (!element) return null;
+  const styleChange = replaceTextWithRanges(element.text, element.styles, start, end, replacement);
+  const tagChange = replaceTextWithRanges(element.text, element.tags, start, end, replacement);
+  element.text = styleChange.text;
+  element.styles = normalizeStyles(styleChange.ranges, element.text.length);
+  element.tags = mergeTagRanges(tagChange.ranges).filter(
+    (tag) => tag.start >= 0 && tag.end <= element.text.length && tag.end > tag.start
+  );
+  return element;
+}
+
+/** Smallest deterministic splice that transforms `before` into `after`. */
+export function textReplacementDifference(before, after) {
+  const source = String(before ?? '');
+  const target = String(after ?? '');
+  let start = 0;
+  while (start < source.length && start < target.length && source[start] === target[start]) start += 1;
+  let end = source.length;
+  let targetEnd = target.length;
+  while (end > start && targetEnd > start && source[end - 1] === target[targetEnd - 1]) {
+    end -= 1;
+    targetEnd -= 1;
+  }
+  return { start, end, replacement: target.slice(start, targetEnd) };
+}
+
+export function replaceElementTextByDiff(element, nextText) {
+  const edit = textReplacementDifference(element?.text, nextText);
+  return replaceElementText(element, edit.start, edit.end, edit.replacement);
+}
+
 /** Split style ranges for an element cut at character offset `at`. */
 export function splitStyles(styles, at) {
   return splitOffsetRanges(styles, at);
@@ -562,6 +597,11 @@ export function cloneDocument(doc) {
     pageLock: {
       ...doc.pageLock,
       anchors: doc.pageLock.anchors.map((a) => ({ ...a })),
+    },
+    production: {
+      ...doc.production,
+      categories: (doc.production?.categories || []).map((category) => ({ ...category })),
+      items: (doc.production?.items || []).map((item) => ({ ...item })),
     },
     meta: { ...doc.meta },
   };

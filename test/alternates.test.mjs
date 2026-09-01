@@ -164,7 +164,7 @@ t('toolbar, native menu, renderer controls, guards, and export warning are wired
   assert.match(editor, /closest\?\.\('\.alt-controls'\)/);
   assert.match(editor, /selectionTouchesAlternates/);
   assert.match(editor, /requestDeleteAlternate/);
-  assert.match(app, /Export Active Choices/);
+  assert.match(app, /Inactive Scriptum alternatives|inactive dialogue alternatives/);
   assert.match(app, /involved\.some\(hasAlternateDialogue\)/);
 });
 

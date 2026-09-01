@@ -72,7 +72,7 @@ export function alternateStatus(element) {
 }
 
 export function addAlternate(element) {
-  if (element?.type !== ElementType.DIALOGUE) return false;
+  if (element?.type !== ElementType.DIALOGUE || element.tags?.length) return false;
   if (!hasAlternateDialogue(element)) {
     const originalId = newId('alt');
     const activeId = newId('alt');
@@ -96,7 +96,7 @@ export function addAlternate(element) {
 }
 
 export function activateAlternate(element, choiceId) {
-  if (!hasAlternateDialogue(element)) return false;
+  if (!hasAlternateDialogue(element) || element.tags?.length) return false;
   const group = element.alternateDialogue;
   const index = group.choices.findIndex((choice) => choice.id === choiceId);
   if (index === -1) return false;
@@ -110,7 +110,7 @@ export function activateAlternate(element, choiceId) {
 }
 
 export function stepAlternate(element, direction) {
-  if (!hasAlternateDialogue(element)) return false;
+  if (!hasAlternateDialogue(element) || element.tags?.length) return false;
   const group = element.alternateDialogue;
   const ordered = [
     ...group.choices.map((choice) => ({ id: choice.id, order: choice.order })),
@@ -122,7 +122,7 @@ export function stepAlternate(element, direction) {
 }
 
 export function deleteActiveAlternate(element) {
-  if (!hasAlternateDialogue(element)) return false;
+  if (!hasAlternateDialogue(element) || element.tags?.length) return false;
   const group = element.alternateDialogue;
   const ordered = [...group.choices].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
   const selected = ordered.find((choice) => choice.order > group.activeOrder) || ordered.at(-1);
