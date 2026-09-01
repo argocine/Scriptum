@@ -26,16 +26,19 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "dist": "electron-builder --mac",
-    "dist:all": "electron-builder -mwl",
+    "dist": "node tools/prepare-dist.mjs && electron-builder --mac",
+    "dist:all": "node tools/prepare-dist.mjs && electron-builder -mwl",
+    "dist:ci": "node tools/prepare-dist.mjs && electron-builder --publish never",
     "verify:package": "node tools/verify-package.mjs",
     "test": "node test/security.test.mjs && node test/release-hardening.test.mjs && node test/model-ranges.test.mjs && node test/assistant.test.mjs && node test/alternates.test.mjs && node test/production.test.mjs && node test/snapshots.test.mjs && node test/story.test.mjs && node test/sprint.test.mjs && node test/table-read.test.mjs && node test/project.test.mjs && node test/format.test.mjs && node test/pdf.test.mjs && node test/unicode-pdf.test.mjs",
     "test:app": "node test/quit.test.mjs && node test/pdf-app.test.mjs"
   },
   "devDependencies": {
+    "@electron/get": "^5.1.0",
     "electron": "^44.1.0",
     "electron-builder": "^26.15.3",
-    "plist": "^5.0.0"
+    "plist": "^5.0.0",
+    "unzipper": "^0.12.5"
   },
   "build": {
     "appId": "org.scriptum.app",
@@ -44,11 +47,11 @@
     "afterPack": "build/after-pack.cjs",
     "extraResources": [
       {
-        "from": "node_modules/electron/dist/LICENSE",
+        "from": "build/electron-notices/ELECTRON-LICENSE.txt",
         "to": "licenses/ELECTRON-LICENSE.txt"
       },
       {
-        "from": "node_modules/electron/dist/LICENSES.chromium.html",
+        "from": "build/electron-notices/LICENSES.chromium.html",
         "to": "licenses/LICENSES.chromium.html"
       },
       {

@@ -85,7 +85,7 @@ jobs:
         run: xvfb-run -a npm run test:app
 
       - name: Build installers
-        run: npx electron-builder --publish never
+        run: npm run dist:ci
         env:
           # macOS uses the explicit ad-hoc identity in package.json. Disabling
           # discovery keeps this free build from searching for paid signing
