@@ -374,6 +374,7 @@ function buildMenu() {
       submenu: [
         cmd('Toggle Sidebar', 'CmdOrCtrl+\\', 'menu:toggle-sidebar'),
         cmd('Index Cards', 'CmdOrCtrl+Shift+B', 'menu:cards'),
+        cmd('Story Timeline', 'CmdOrCtrl+Shift+T', 'menu:timeline'),
         cmd('Reports…', 'CmdOrCtrl+R', 'menu:reports'),
         { type: 'separator' },
         cmd('Zoom In', 'CmdOrCtrl+Plus', 'menu:zoom-in'),

@@ -47,6 +47,7 @@
 
         <div class="tb-group">
           <button class="btn" id="tb-cards" title="Index cards (⌘⇧B)">Cards</button>
+          <button class="btn" id="tb-timeline" title="Acts, sequences, story lanes, and beats">Timeline</button>
           <button class="btn" id="tb-find" title="Find &amp; Replace (⌘F)">Find</button>
         </div>
         <div class="tb-sep"></div>
@@ -97,7 +98,14 @@
             ></div>
           </div>
 
-          <div id="cards-view" aria-label="Index cards" aria-hidden="true"><div class="card-grid" id="card-grid"></div></div>
+          <div id="cards-view" aria-label="Story planning board" aria-hidden="true">
+            <div class="board-tabs" role="tablist" aria-label="Story planning views">
+              <button class="board-tab active" id="board-tab-cards" role="tab" aria-selected="true" aria-controls="card-grid">Index Cards</button>
+              <button class="board-tab" id="board-tab-timeline" role="tab" aria-selected="false" aria-controls="story-timeline">Story Timeline</button>
+            </div>
+            <div class="card-grid board-pane active" id="card-grid" role="tabpanel" aria-labelledby="board-tab-cards"></div>
+            <div class="board-pane" id="story-timeline" role="tabpanel" aria-labelledby="board-tab-timeline"></div>
+          </div>
 
           <div id="findbar" role="search" aria-label="Find and replace">
             <input type="text" id="find-input" placeholder="Find" aria-label="Find" />

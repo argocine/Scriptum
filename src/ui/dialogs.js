@@ -48,6 +48,16 @@ import {
   restoreRevisionSnapshot,
   revisionChangeReportText,
 } from '../features/snapshots.js';
+import {
+  MAX_STORY_BEATS,
+  MAX_STORY_LANES,
+  MAX_STORY_SECTIONS,
+  addStoryBeat,
+  addStoryLane,
+  addStorySection,
+  deleteStoryEntry,
+  updateStoryEntry,
+} from '../features/story.js';
 
 /* ------------------------------------------------------------------ *
  * Tiny DOM builder
@@ -902,6 +912,197 @@ export function revisionRoomDialog(
     body,
     wide: true,
     buttons: [{ label: 'Close', primary: true }],
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Story Timeline editors
+ * ------------------------------------------------------------------ */
+
+export function storyEntryDialog(
+  editor,
+  kind,
+  { entryId = null, confirm, onChange, onFocus, toast } = {}
+) {
+  const story = editor.doc.story;
+  const collection = kind === 'lane' ? 'lanes' : kind === 'beat' ? 'beats' : 'sections';
+  const existing = story[collection].find((entry) => entry.id === entryId) || null;
+  let focusId = existing?.id || null;
+  const scenes = getScenes(editor.doc);
+  const current = editor.currentElement();
+  const currentScene = current
+    ? scenes.find((scene) => scene.elements.some((element) => element.id === current.id))
+    : null;
+
+  const draft = existing
+    ? { ...existing }
+    : kind === 'lane'
+      ? { name: `Story Lane ${story.lanes.length + 1}`, color: '#5b8dff' }
+      : kind === 'beat'
+        ? {
+            title: `Beat ${story.beats.length + 1}`,
+            description: '',
+            sceneId: currentScene?.id || null,
+            laneId: story.lanes[0]?.id || null,
+            color: '#e6c25a',
+          }
+        : {
+            kind: kind === 'sequence' ? 'sequence' : 'act',
+            name: kind === 'sequence' ? 'Sequence' : `Act ${story.sections.filter((s) => s.kind === 'act').length + 1}`,
+            startSceneId: currentScene?.id || scenes[0]?.id || null,
+            color: kind === 'sequence' ? '#8c75d6' : '#e06a80',
+          };
+
+  const sceneSelect = (value, onChange) =>
+    h(
+      'select',
+      { onChange: (event) => onChange(event.target.value || null) },
+      h('option', { value: '', selected: !value }, 'Unplaced'),
+      ...scenes.map((scene) =>
+        h(
+          'option',
+          { value: scene.id, selected: value === scene.id },
+          `${scene.sceneNumber || scene.index + 1}. ${scene.heading || '(untitled scene)'}`
+        )
+      )
+    );
+
+  let body;
+  let title;
+  if (kind === 'lane') {
+    title = existing ? 'Edit Story Lane' : 'Add Story Lane';
+    body = h(
+      'div',
+      {},
+      field('Name', textInput(draft.name, (value) => (draft.name = value), { maxlength: '120' })),
+      field(
+        'Colour',
+        h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+      ),
+      existing && story.lanes.length === 1
+        ? h('p', { class: 'hint' }, 'Every story map keeps at least one lane.')
+        : null
+    );
+  } else if (kind === 'beat') {
+    title = existing ? 'Edit Story Beat' : 'Add Story Beat';
+    const laneSelect = h(
+      'select',
+      { onChange: (event) => (draft.laneId = event.target.value || null) },
+      h('option', { value: '', selected: !draft.laneId }, 'Unassigned lane'),
+      ...story.lanes.map((lane) =>
+        h('option', { value: lane.id, selected: draft.laneId === lane.id }, lane.name)
+      )
+    );
+    body = h(
+      'div',
+      {},
+      field('Beat', textInput(draft.title, (value) => (draft.title = value), { maxlength: '160' })),
+      field(
+        'Description',
+        h('textarea', { maxlength: '4000', rows: '5', onInput: (event) => (draft.description = event.target.value) }, draft.description || '')
+      ),
+      h(
+        'div',
+        { class: 'row' },
+        field('Scene', sceneSelect(draft.sceneId, (value) => (draft.sceneId = value))),
+        field('Lane', laneSelect),
+        field(
+          'Colour',
+          h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+        )
+      )
+    );
+  } else {
+    title = existing ? 'Edit Story Section' : `Add ${draft.kind === 'sequence' ? 'Sequence' : 'Act'}`;
+    const kindSelect = h(
+      'select',
+      { onChange: (event) => (draft.kind = event.target.value) },
+      h('option', { value: 'act', selected: draft.kind === 'act' }, 'Act'),
+      h('option', { value: 'sequence', selected: draft.kind === 'sequence' }, 'Sequence')
+    );
+    body = h(
+      'div',
+      {},
+      field('Name', textInput(draft.name, (value) => (draft.name = value), { maxlength: '120' })),
+      h(
+        'div',
+        { class: 'row' },
+        field('Kind', kindSelect),
+        field('Begins at', sceneSelect(draft.startSceneId, (value) => (draft.startSceneId = value))),
+        field(
+          'Colour',
+          h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+        )
+      )
+    );
+  }
+
+  openDialog({
+    title,
+    body,
+    wide: kind === 'beat',
+    buttons: [
+      existing && {
+        label: 'Delete',
+        onClick: () => {
+          if (kind === 'lane' && story.lanes.length === 1) {
+            toast?.('Every story map keeps at least one lane.');
+            return true;
+          }
+          (async () => {
+            const choice = await confirm?.({
+              message: `Delete “${existing.name || existing.title}”?`,
+              detail: kind === 'lane'
+                ? 'Beats on this lane will move to Unassigned.'
+                : 'This removes only the story-map entry, not screenplay text.',
+              buttons: ['Delete', 'Cancel'],
+              defaultId: 1,
+            });
+            if (choice !== 0) return;
+            editor.commit(() => {
+              deleteStoryEntry(story, collection, existing.id);
+              return null;
+            });
+            focusId = null;
+            onChange?.();
+            closeDialog();
+          })();
+          return true;
+        },
+      },
+      { label: 'Cancel' },
+      {
+        label: existing ? 'Save' : 'Add',
+        primary: true,
+        onClick: () => {
+          const atLimit =
+            !existing &&
+            ((kind === 'lane' && story.lanes.length >= MAX_STORY_LANES) ||
+              (kind === 'beat' && story.beats.length >= MAX_STORY_BEATS) ||
+              ((kind === 'act' || kind === 'sequence') &&
+                story.sections.length >= MAX_STORY_SECTIONS));
+          if (atLimit) {
+            toast?.('The story map has reached its entry limit.');
+            return true;
+          }
+          let result = true;
+          editor.commit(() => {
+            if (existing) result = updateStoryEntry(story, collection, existing.id, draft);
+            else if (kind === 'lane') result = addStoryLane(story, draft);
+            else if (kind === 'beat') result = addStoryBeat(story, draft);
+            else result = addStorySection(story, draft);
+            return null;
+          });
+          if (!result) {
+            toast?.('The story map has reached its entry limit.');
+            return true;
+          }
+          focusId = result?.id || existing?.id || null;
+          onChange?.();
+        },
+      },
+    ].filter(Boolean),
+    onClose: () => onFocus?.(focusId),
   });
 }
 

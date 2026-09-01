@@ -11,6 +11,7 @@ import { createDocument, createElement, normalizeStyles } from '../core/model.js
 import { normalizeAlternateDialogue } from '../core/alternates.js';
 import { normalizeElementTags, normalizeProductionRegistry } from '../core/production.js';
 import { normalizeRevisionRoom } from '../features/snapshots.js';
+import { normalizeStoryMap } from '../features/story.js';
 
 const FORMAT = 'scriptum-screenplay';
 const FORMAT_VERSION = 1;
@@ -172,6 +173,14 @@ export function parseProject(json) {
   };
 
   if (!doc.elements.length) doc.elements.push(createElement(ElementType.SCENE_HEADING, ''));
+  doc.story = normalizeStoryMap(
+    d.story,
+    new Set(
+      doc.elements
+        .filter((element) => element.type === ElementType.SCENE_HEADING)
+        .map((element) => element.id)
+    )
+  );
   return doc;
 }
 

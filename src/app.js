@@ -11,6 +11,8 @@ import { createDocument, createElement, getScenes, getElement, indexOfElement } 
 import { estimateRuntime } from './core/paginate.js';
 import { ScriptEditor, inferElements } from './ui/editor.js';
 import { CardBoard } from './features/cards.js';
+import { StoryTimeline } from './features/story-timeline.js';
+import { documentHasStoryMap } from './features/story.js';
 import { Finder } from './features/find.js';
 import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
@@ -35,6 +37,7 @@ import {
   sceneNumbersDialog,
   revisionsDialog,
   revisionRoomDialog,
+  storyEntryDialog,
   reportsDialog,
   formatAssistantDialog,
   productionTagDialog,
@@ -146,6 +149,7 @@ const dom = {
   paneBreakdown: document.getElementById('pane-breakdown'),
   cardsView: document.getElementById('cards-view'),
   cardGrid: document.getElementById('card-grid'),
+  storyTimeline: document.getElementById('story-timeline'),
   findbar: document.getElementById('findbar'),
   toast: document.getElementById('toast'),
   stPage: document.getElementById('st-page'),
@@ -164,6 +168,7 @@ const state = {
   zoom: 100,
   theme: storedTheme(),
   cardsOpen: false,
+  boardMode: 'cards',
   recoveryEnabled: true,
 };
 
@@ -176,6 +181,15 @@ const editor = new ScriptEditor({
 
 const finder = new Finder(editor);
 const board = new CardBoard(dom.cardGrid, editor, { onJumpToScene: jumpToScene });
+const timeline = new StoryTimeline(dom.storyTimeline, editor, {
+  onJumpToScene: jumpToScene,
+  onAddSection: (kind) => openStoryEntry(kind),
+  onAddLane: () => openStoryEntry('lane'),
+  onAddBeat: () => openStoryEntry('beat'),
+  onEditSection: (id) => openStoryEntry('section', id),
+  onEditLane: (id) => openStoryEntry('lane', id),
+  onEditBeat: (id) => openStoryEntry('beat', id),
+});
 
 /* ------------------------------------------------------------------ *
  * Boot
@@ -185,6 +199,7 @@ function boot() {
   applyTheme(state.theme);
   buildElementSelect();
   wireToolbar();
+  wireBoardTabs();
   wireSidebar();
   wireFindBar();
   wireMenus();
@@ -273,7 +288,8 @@ function wireToolbar() {
   });
   on('tb-tag', () => productionTagDialog(editor, { toast }));
   on('tb-omit', omitScene);
-  on('tb-cards', toggleCards);
+  on('tb-cards', () => toggleCards('cards'));
+  on('tb-timeline', () => toggleCards('timeline'));
   on('tb-find', openFind);
   on('tb-revision', () => revisionsDialog(editor, toast));
   on('tb-revision-room', openRevisionRoom);
@@ -282,6 +298,36 @@ function wireToolbar() {
   on('tb-title', () => titlePageDialog(editor));
   on('tb-privacy', privacyDialog);
   on('tb-pdf', exportPdf);
+}
+
+function wireBoardTabs() {
+  const tabs = [
+    document.getElementById('board-tab-cards'),
+    document.getElementById('board-tab-timeline'),
+  ];
+  const activate = (index, focus = false) => {
+    state.boardMode = index === 0 ? 'cards' : 'timeline';
+    syncBoardMode();
+    if (focus) tabs[index].focus();
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => activate(index));
+    tab.addEventListener('keydown', (event) => {
+      let target = index;
+      if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') target = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'Home') target = 0;
+      else if (event.key === 'End') target = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(target, true);
+    });
+  });
+  dom.cardsView.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.cardsOpen) return;
+    event.preventDefault();
+    closeBoard();
+  });
 }
 
 function wireSidebar() {
@@ -450,7 +496,8 @@ function wireMenus() {
   m('menu:title-page', () => titlePageDialog(editor));
 
   m('menu:toggle-sidebar', toggleSidebar);
-  m('menu:cards', toggleCards);
+  m('menu:cards', () => toggleCards('cards'));
+  m('menu:timeline', () => toggleCards('timeline'));
   m('menu:reports', openReports);
   m('menu:zoom-in', () => setZoom(state.zoom + 10));
   m('menu:zoom-out', () => setZoom(state.zoom - 10));
@@ -476,7 +523,7 @@ function wireMenus() {
     };
     if (k === 'b' && e.shiftKey) {
       e.preventDefault();
-      toggleCards();
+      toggleCards('cards');
       return;
     }
     if (map[k] && !(k === 'b' || k === 'i' || k === 'u')) {
@@ -624,12 +671,14 @@ async function exportInterchangeWithAlternates(kind, buildText) {
   const hasAlternates = documentHasAlternates(editor.doc);
   const hasTags = documentHasProductionTags(editor.doc);
   const hasSnapshots = !!editor.doc.revisionRoom?.snapshots?.length;
-  if (hasAlternates || hasTags || hasSnapshots) {
+  const hasStory = documentHasStoryMap(editor.doc);
+  if (hasAlternates || hasTags || hasSnapshots || hasStory) {
     const label = kind === 'fdx' ? 'Final Draft' : 'Fountain';
     const omissions = [
       hasAlternates ? 'inactive dialogue alternatives' : '',
       hasTags ? 'production tags' : '',
       hasSnapshots ? 'Revision Room snapshots' : '',
+      hasStory ? 'Story Timeline data' : '',
     ].filter(Boolean).join(' and ');
     const choice = await platform.confirm({
       message: `Export screenplay text to ${label}?`,
@@ -814,7 +863,7 @@ function toggleProductionTags() {
 }
 
 function jumpToScene(sceneId) {
-  if (state.cardsOpen) toggleCards();
+  if (state.cardsOpen) closeBoard();
   editor.renderer.scrollToElement(sceneId, 'smooth');
   editor.setCaret(sceneId, 0);
   dom.pages.focus();
@@ -838,7 +887,7 @@ function openRevisionRoom() {
     confirm: (options) => platform.confirm(options),
     normalizeState: normalizeDocument,
     onGoTo: (elementId) => {
-      if (state.cardsOpen) toggleCards();
+      if (state.cardsOpen) closeBoard();
       editor.renderer.scrollToElement(elementId, 'smooth');
       editor.setCaret(elementId, 0, { scroll: true });
       dom.pages.focus();
@@ -862,6 +911,18 @@ function openRevisionRoom() {
   });
 }
 
+function openStoryEntry(kind, entryId = null) {
+  storyEntryDialog(editor, kind, {
+    entryId,
+    confirm: (options) => platform.confirm(options),
+    onChange: () => timeline.render(),
+    onFocus: (id) => {
+      if (!timeline.focusEntry(id)) document.getElementById('board-tab-timeline').focus();
+    },
+    toast,
+  });
+}
+
 function jumpToFormatIssue(issue) {
   if (issue?.field?.startsWith('title.')) {
     titlePageDialog(editor);
@@ -872,7 +933,7 @@ function jumpToFormatIssue(issue) {
     return;
   }
   if (!issue?.elementId) return;
-  if (state.cardsOpen) toggleCards();
+  if (state.cardsOpen) closeBoard();
   const index = indexOfElement(editor.doc, issue.elementId);
   if (index === -1) return;
   editor.renderer.scrollToElement(issue.elementId, 'smooth');
@@ -900,16 +961,54 @@ function toggleSidebar() {
   document.getElementById('tb-sidebar').setAttribute('aria-expanded', String(!collapsed));
 }
 
-function toggleCards() {
-  state.cardsOpen = !state.cardsOpen;
+function toggleCards(mode = 'cards') {
+  if (state.cardsOpen && state.boardMode === mode) {
+    closeBoard();
+    return;
+  }
+  state.cardsOpen = true;
+  state.boardMode = mode;
   dom.cardsView.classList.toggle('open', state.cardsOpen);
   dom.cardsView.setAttribute('aria-hidden', String(!state.cardsOpen));
   dom.scroll.inert = state.cardsOpen;
-  const button = document.getElementById('tb-cards');
-  button.classList.toggle('active', state.cardsOpen);
-  button.setAttribute('aria-pressed', String(state.cardsOpen));
-  if (state.cardsOpen) board.render();
-  else dom.pages.focus();
+  syncBoardMode();
+  document.getElementById(mode === 'cards' ? 'board-tab-cards' : 'board-tab-timeline').focus();
+}
+
+function closeBoard() {
+  state.cardsOpen = false;
+  dom.cardsView.classList.remove('open');
+  dom.cardsView.setAttribute('aria-hidden', 'true');
+  dom.scroll.inert = false;
+  document.getElementById('tb-cards').classList.remove('active');
+  document.getElementById('tb-cards').setAttribute('aria-pressed', 'false');
+  document.getElementById('tb-timeline').classList.remove('active');
+  document.getElementById('tb-timeline').setAttribute('aria-pressed', 'false');
+  dom.pages.focus();
+}
+
+function syncBoardMode() {
+  const cards = state.boardMode === 'cards';
+  dom.cardGrid.classList.toggle('active', cards);
+  dom.storyTimeline.classList.toggle('active', !cards);
+  dom.cardGrid.hidden = !cards;
+  dom.storyTimeline.hidden = cards;
+  const cardTab = document.getElementById('board-tab-cards');
+  const timelineTab = document.getElementById('board-tab-timeline');
+  cardTab.classList.toggle('active', cards);
+  timelineTab.classList.toggle('active', !cards);
+  cardTab.setAttribute('aria-selected', String(cards));
+  timelineTab.setAttribute('aria-selected', String(!cards));
+  cardTab.tabIndex = cards ? 0 : -1;
+  timelineTab.tabIndex = cards ? -1 : 0;
+  const cardButton = document.getElementById('tb-cards');
+  const timelineButton = document.getElementById('tb-timeline');
+  cardButton.classList.toggle('active', cards);
+  timelineButton.classList.toggle('active', !cards);
+  cardButton.setAttribute('aria-pressed', String(cards));
+  timelineButton.setAttribute('aria-pressed', String(!cards));
+  if (cards) board.render();
+  else timeline.render();
 }
 
 function applyTheme(theme) {
@@ -1020,7 +1119,10 @@ function refreshSidebar() {
   else if (activePane === 'pane-characters') renderCharacterPane();
   else if (activePane === 'pane-notes') renderNotesPane();
   else renderBreakdownPane();
-  if (state.cardsOpen) board.render();
+  if (state.cardsOpen) {
+    if (state.boardMode === 'cards') board.render();
+    else timeline.render();
+  }
 }
 
 function renderScenePane() {
@@ -1221,4 +1323,4 @@ function sampleDocument() {
 boot();
 
 // Handy from the console and from automated checks; reads live state only.
-window.__scriptum = { editor, finder, board, state, platform };
+window.__scriptum = { editor, finder, board, timeline, state, platform };

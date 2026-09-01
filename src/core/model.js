@@ -85,6 +85,12 @@ export function createDocument(overrides = {}) {
       schemaVersion: 1,
       snapshots: [],
     },
+    story: {
+      schemaVersion: 1,
+      sections: [],
+      lanes: [{ id: 'lane-main', name: 'Main Story', color: '#5b8dff', order: 1 }],
+      beats: [],
+    },
     meta: {
       created: new Date().toISOString(),
       modified: new Date().toISOString(),
@@ -612,6 +618,12 @@ export function cloneDocument(doc) {
     revisionRoom: {
       ...(doc.revisionRoom || { schemaVersion: 1 }),
       snapshots: [...(doc.revisionRoom?.snapshots || [])],
+    },
+    story: {
+      ...(doc.story || { schemaVersion: 1 }),
+      sections: (doc.story?.sections || []).map((section) => ({ ...section })),
+      lanes: (doc.story?.lanes || []).map((lane) => ({ ...lane })),
+      beats: (doc.story?.beats || []).map((beat) => ({ ...beat })),
     },
     meta: { ...doc.meta },
   };

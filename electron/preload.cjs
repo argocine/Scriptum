@@ -47,6 +47,7 @@ const MENU_CHANNELS = [
   'menu:title-page',
   'menu:toggle-sidebar',
   'menu:cards',
+  'menu:timeline',
   'menu:reports',
   'menu:zoom-in',
   'menu:zoom-out',
