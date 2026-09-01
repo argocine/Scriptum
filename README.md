@@ -57,6 +57,10 @@ Cards, beats, lanes, snapshots, and dialogue alternatives stay attached to
 stable screenplay identifiers when scenes move. They are saved in the native
 `.scriptum` document—not in a separate account or service.
 
+The larger Beat Board-to-pages workflow is planned for **Story Studio 2.0** and
+remains pending. Its scope and release criteria are recorded in the
+[development roadmap](ROADMAP.md).
+
 ## Ready when production is
 
 Scriptum follows the draft beyond the writer's desk:
@@ -197,6 +201,9 @@ Those limits are deliberate facts, not fine print.
 
 Scriptum is MIT-licensed free software, developed in public, and continually
 improved with new features, refinements, and fixes.
+
+The [development roadmap](ROADMAP.md) records completed work and features still
+being designed. Roadmap entries are plans, not promises or release dates.
 
 If something would make Scriptum better for the way you write,
 [open an issue](https://github.com/argocine/Scriptum/issues). Suggestions, bug
