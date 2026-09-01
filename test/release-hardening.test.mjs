@@ -67,8 +67,8 @@ await t('an older save cannot mark a newer document revision clean', async () =>
 });
 
 await t('file-association arguments accept only supported screenplay paths', () => {
-  assert.equal(openPathFromArguments(['--flag', '/tmp/Draft.SCRIPTUM']), '/tmp/Draft.SCRIPTUM');
-  assert.equal(openPathFromArguments(['/tmp/readme.md', '/tmp/story.fountain']), '/tmp/story.fountain');
+  assert.equal(openPathFromArguments(['--flag', '/tmp/Draft.SCRIPTUM']), path.resolve('/tmp/Draft.SCRIPTUM'));
+  assert.equal(openPathFromArguments(['/tmp/readme.md', '/tmp/story.fountain']), path.resolve('/tmp/story.fountain'));
   assert.equal(openPathFromArguments(['--dev', '/tmp/malware.app']), null);
 });
 
