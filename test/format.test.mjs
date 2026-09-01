@@ -6,6 +6,7 @@ import {
   linesFromMargins,
   marginBottomFromLines,
   PAPER,
+  applyCase,
 } from '../src/core/format.js';
 import { createDocument, createElement, getScenes, collectCharacters } from '../src/core/model.js';
 import { paginate, wrapText, assignSceneNumbers, lockPages } from '../src/core/paginate.js';
@@ -13,6 +14,7 @@ import { parseFountain, toFountain, parseInline, serializeInline } from '../src/
 import { exportPDF } from '../src/io/pdf.js';
 import { toPlainText } from '../src/io/project.js';
 import { sceneReport, characterReport, statistics } from '../src/features/reports.js';
+import { fallbackTextClusters, textClusters } from '../src/core/unicode.js';
 
 let pass = 0;
 const t = (name, fn) => {
@@ -98,6 +100,27 @@ t('hard-breaks a word longer than the line', () => {
 });
 t('empty text yields one empty line', () => {
   assert.deepEqual(wrapText('', 60), [{ text: '', start: 0, end: 0 }]);
+});
+t('combining marks and joined emoji are never split', () => {
+  const source = 'Ae\u0308👩‍🚀B';
+  const lines = wrapText(source, 2);
+  assert.deepEqual(lines.map((line) => line.text), ['Ae\u0308', '👩‍🚀', 'B']);
+  lines.forEach((line) => assert.equal(source.slice(line.start, line.end), line.text));
+});
+t('Indic conjuncts and Hangul Jamo remain complete grapheme clusters', () => {
+  const source = 'Aक्ष한B';
+  assert.deepEqual(textClusters(source).map((cluster) => cluster.text), ['A', 'क्ष', '한', 'B']);
+  assert.deepEqual(fallbackTextClusters(source).map((cluster) => cluster.text), ['A', 'क्ष', '한', 'B']);
+  assert.deepEqual(wrapText(source, 1).map((line) => line.text), ['A', 'क्ष', '한', 'B']);
+});
+t('full-width scripts use two screenplay cells per glyph', () => {
+  assert.deepEqual(wrapText('東京猫犬', 6).map((line) => line.text), ['東京猫', '犬']);
+});
+t('Unicode uppercasing keeps selection and style offsets stable', () => {
+  const source = 'café straße µ';
+  const upper = applyCase(source, { case: 'upper' });
+  assert.equal(upper, 'CAFÉ STRAẞE Μ');
+  assert.equal(upper.length, source.length);
 });
 
 /* ---------------- pagination ---------------- */

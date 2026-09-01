@@ -7,7 +7,7 @@
  */
 
 import { ElementType } from '../core/format.js';
-import { getScenes } from '../core/model.js';
+import { getScenes, replaceElementTextByDiff } from '../core/model.js';
 
 export const CARD_COLORS = [
   { name: 'None', value: null },
@@ -74,7 +74,7 @@ export class CardBoard {
       if (text === scene.heading) return;
       this.editor.commit(() => {
         const el = this.editor.doc.elements.find((e) => e.id === scene.id);
-        if (el) el.text = text;
+        if (el) replaceElementTextByDiff(el, text);
         return null;
       }, { rebuildVocab: true });
       this.render();
@@ -92,9 +92,11 @@ export class CardBoard {
     body.contentEditable = 'true';
     body.setAttribute('role', 'textbox');
     body.setAttribute('aria-label', `Scene ${scene.sceneNumber || index + 1} synopsis`);
-    body.textContent = heading?.synopsis || scene.summary || '';
+    const displayedSynopsis = heading?.synopsis || scene.summary || '';
+    body.textContent = displayedSynopsis;
     body.addEventListener('blur', () => {
       const text = body.textContent.trim();
+      if (text === displayedSynopsis) return;
       this.editor.commit(() => {
         const el = this.editor.doc.elements.find((e) => e.id === scene.id);
         if (el) el.synopsis = text;
@@ -126,6 +128,9 @@ export class CardBoard {
           return null;
         });
         this.render();
+        this.host
+          .querySelector(`.card[data-scene-id="${scene.id}"] .card-color[aria-label="${c.name} card colour"]`)
+          ?.focus();
       });
       colors.appendChild(dot);
     }
@@ -142,7 +147,7 @@ export class CardBoard {
     earlier.disabled = index === 0;
     earlier.addEventListener('click', (event) => {
       event.stopPropagation();
-      this.moveScene(scene.id, scenes[index - 1]?.id || null);
+      this.moveScene(scene.id, scenes[index - 1]?.id || null, 'earlier');
     });
     const later = document.createElement('button');
     later.type = 'button';
@@ -153,7 +158,7 @@ export class CardBoard {
     later.disabled = index === scenes.length - 1;
     later.addEventListener('click', (event) => {
       event.stopPropagation();
-      this.moveScene(scene.id, scenes[index + 2]?.id || null);
+      this.moveScene(scene.id, scenes[index + 2]?.id || null, 'later');
     });
     order.append(earlier, later);
     foot.appendChild(order);
@@ -193,7 +198,7 @@ export class CardBoard {
   }
 
   /** Move an entire scene (heading plus body) to sit before `beforeSceneId`. */
-  moveScene(sceneId, beforeSceneId) {
+  moveScene(sceneId, beforeSceneId, focusDirection = '') {
     this.editor.commit(() => {
       const doc = this.editor.doc;
       const scenes = getScenes(doc);
@@ -217,5 +222,10 @@ export class CardBoard {
     }, { rebuildVocab: true });
 
     this.render();
+    if (focusDirection) {
+      this.host
+        .querySelector(`.card[data-scene-id="${sceneId}"] .card-order-button[aria-label="Move scene ${focusDirection}"]`)
+        ?.focus();
+    }
   }
 }
