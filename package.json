@@ -24,7 +24,7 @@
     "dev": "electron . --dev",
     "dist": "electron-builder --mac",
     "dist:all": "electron-builder -mwl",
-    "test": "node test/security.test.mjs && node test/model-ranges.test.mjs && node test/assistant.test.mjs && node test/alternates.test.mjs && node test/production.test.mjs && node test/project.test.mjs && node test/format.test.mjs && node test/pdf.test.mjs",
+    "test": "node test/security.test.mjs && node test/model-ranges.test.mjs && node test/assistant.test.mjs && node test/alternates.test.mjs && node test/production.test.mjs && node test/snapshots.test.mjs && node test/project.test.mjs && node test/format.test.mjs && node test/pdf.test.mjs",
     "test:app": "node test/quit.test.mjs"
   },
   "devDependencies": {

@@ -81,6 +81,10 @@ export function createDocument(overrides = {}) {
     },
     characters: {}, // name -> {name, count, extension}
     production: createProductionRegistry(),
+    revisionRoom: {
+      schemaVersion: 1,
+      snapshots: [],
+    },
     meta: {
       created: new Date().toISOString(),
       modified: new Date().toISOString(),
@@ -602,6 +606,12 @@ export function cloneDocument(doc) {
       ...doc.production,
       categories: (doc.production?.categories || []).map((category) => ({ ...category })),
       items: (doc.production?.items || []).map((item) => ({ ...item })),
+    },
+    // Snapshot bodies are deeply frozen and immutable. Copy the collection so
+    // undo can add/delete entries without cloning every screenplay body.
+    revisionRoom: {
+      ...(doc.revisionRoom || { schemaVersion: 1 }),
+      snapshots: [...(doc.revisionRoom?.snapshots || [])],
     },
     meta: { ...doc.meta },
   };

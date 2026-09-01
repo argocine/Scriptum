@@ -782,6 +782,120 @@ table.data td.mono {
   background: var(--accent-soft);
 }
 
+/* Revision Room */
+.snapshot-create {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.snapshot-controls,
+.snapshot-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+  margin: 8px 0;
+}
+.snapshot-summary span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+.snapshot-columns {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.38fr) minmax(0, 1fr);
+  gap: 12px;
+  min-height: 330px;
+  max-height: 48vh;
+  padding-top: 12px;
+}
+.snapshot-list,
+.snapshot-results,
+.snapshot-changes {
+  min-height: 0;
+  overflow: auto;
+}
+.snapshot-list {
+  padding-right: 8px;
+  border-right: 1px solid var(--border);
+}
+.snapshot-row,
+.snapshot-change {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 5px;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+}
+button.snapshot-row,
+button.snapshot-change {
+  cursor: pointer;
+}
+.snapshot-row:hover,
+.snapshot-row.active,
+.snapshot-change:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.snapshot-row span,
+.snapshot-row small,
+.snapshot-copy span,
+.snapshot-copy small {
+  color: var(--muted);
+}
+.snapshot-change {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  align-items: start;
+}
+.snapshot-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.snapshot-kind {
+  display: inline-block;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--panel-2);
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+}
+.snapshot-kind.added { color: #248247; }
+.snapshot-kind.removed { color: var(--danger); }
+.snapshot-kind.changed { color: #a06c00; }
+.snapshot-kind.moved { color: var(--accent); }
+.btn.danger { color: var(--danger); }
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (max-width: 760px) {
+  .snapshot-columns { grid-template-columns: 1fr; }
+  .snapshot-list { border-right: 0; border-bottom: 1px solid var(--border); padding-right: 0; }
+}
+
 /* Toast */
 #toast {
   position: fixed;

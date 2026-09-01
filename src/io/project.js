@@ -10,6 +10,7 @@ import { ElementType, ELEMENT_ORDER, applyCase } from '../core/format.js';
 import { createDocument, createElement, normalizeStyles } from '../core/model.js';
 import { normalizeAlternateDialogue } from '../core/alternates.js';
 import { normalizeElementTags, normalizeProductionRegistry } from '../core/production.js';
+import { normalizeRevisionRoom } from '../features/snapshots.js';
 
 const FORMAT = 'scriptum-screenplay';
 const FORMAT_VERSION = 1;
@@ -73,7 +74,6 @@ export function parseProject(json) {
 
   const doc = {
     ...base,
-    ...d,
     title: {
       ...base.title,
       ...Object.fromEntries(
@@ -128,6 +128,12 @@ export function parseProject(json) {
     },
     meta: { ...base.meta, ...meta },
     production,
+    revisionRoom: normalizeRevisionRoom(d.revisionRoom, {
+      // Snapshot bodies cross the same hostile file boundary as the live
+      // document. Hydrate them through the identical whitelist/ID repair path
+      // before Revision Room can compare or restore them.
+      normalizeState: (state) => normalizeDocument(state),
+    }),
     styleOverrides: isRecord(d.styleOverrides) ? d.styleOverrides : {},
     pageOverrides: isRecord(d.pageOverrides) ? d.pageOverrides : {},
     elements: (Array.isArray(d.elements) ? d.elements : []).filter(isRecord).map((e) => {

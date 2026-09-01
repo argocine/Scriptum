@@ -40,6 +40,7 @@ const MENU_CHANNELS = [
   'menu:scene-numbers',
   'menu:lock-scenes',
   'menu:revisions',
+  'menu:revision-room',
   'menu:lock-pages',
   'menu:unlock-pages',
   'menu:omit-scene',

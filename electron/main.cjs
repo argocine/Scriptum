@@ -359,6 +359,7 @@ function buildMenu() {
         cmd('Lock Scene Numbers', null, 'menu:lock-scenes'),
         { type: 'separator' },
         cmd('Revisions…', null, 'menu:revisions'),
+        cmd('Revision Room…', 'CmdOrCtrl+Alt+R', 'menu:revision-room'),
         cmd('Lock Pages', null, 'menu:lock-pages'),
         cmd('Unlock Pages', null, 'menu:unlock-pages'),
         { type: 'separator' },

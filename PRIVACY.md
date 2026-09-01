@@ -7,6 +7,11 @@ The application does not collect, transmit, sell, or share personal data or
 screenplay content. It contains no analytics, advertising, telemetry, cloud
 sync, crash reporting, or tracking code.
 
+Alternate dialogue, production tags, and Revision Room snapshots are part of
+the screenplay document. They are saved inside the local `.scriptum` file and,
+while work is unsaved, may also be present in the local crash-recovery copy
+described below. Scriptum never uploads these features or their contents.
+
 ## Desktop application
 
 - Scriptum reads a screenplay only after you choose a file or open a supported

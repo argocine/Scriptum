@@ -34,6 +34,7 @@ import {
   pageSetupDialog,
   sceneNumbersDialog,
   revisionsDialog,
+  revisionRoomDialog,
   reportsDialog,
   formatAssistantDialog,
   productionTagDialog,
@@ -275,6 +276,7 @@ function wireToolbar() {
   on('tb-cards', toggleCards);
   on('tb-find', openFind);
   on('tb-revision', () => revisionsDialog(editor, toast));
+  on('tb-revision-room', openRevisionRoom);
   on('tb-format-assistant', openFormatAssistant);
   on('tb-reports', openReports);
   on('tb-title', () => titlePageDialog(editor));
@@ -441,6 +443,7 @@ function wireMenus() {
   m('menu:scene-numbers', () => sceneNumbersDialog(editor));
   m('menu:lock-scenes', () => lockScenesAction(editor, toast));
   m('menu:revisions', () => revisionsDialog(editor, toast));
+  m('menu:revision-room', openRevisionRoom);
   m('menu:lock-pages', () => pageLockDialog(editor, true, toast));
   m('menu:unlock-pages', () => pageLockDialog(editor, false, toast));
   m('menu:omit-scene', omitScene);
@@ -620,11 +623,13 @@ async function exportText(text, kind) {
 async function exportInterchangeWithAlternates(kind, buildText) {
   const hasAlternates = documentHasAlternates(editor.doc);
   const hasTags = documentHasProductionTags(editor.doc);
-  if (hasAlternates || hasTags) {
+  const hasSnapshots = !!editor.doc.revisionRoom?.snapshots?.length;
+  if (hasAlternates || hasTags || hasSnapshots) {
     const label = kind === 'fdx' ? 'Final Draft' : 'Fountain';
     const omissions = [
       hasAlternates ? 'inactive dialogue alternatives' : '',
       hasTags ? 'production tags' : '',
+      hasSnapshots ? 'Revision Room snapshots' : '',
     ].filter(Boolean).join(' and ');
     const choice = await platform.confirm({
       message: `Export screenplay text to ${label}?`,
@@ -826,6 +831,35 @@ function openReports() {
 
 function openFormatAssistant() {
   formatAssistantDialog(editor, { onGoTo: jumpToFormatIssue });
+}
+
+function openRevisionRoom() {
+  revisionRoomDialog(editor, {
+    confirm: (options) => platform.confirm(options),
+    normalizeState: normalizeDocument,
+    onGoTo: (elementId) => {
+      if (state.cardsOpen) toggleCards();
+      editor.renderer.scrollToElement(elementId, 'smooth');
+      editor.setCaret(elementId, 0, { scroll: true });
+      dom.pages.focus();
+    },
+    onExportReport: async (text, snapshotName) => {
+      const safe = snapshotName.replace(/[^\w\s-]/g, '').trim() || 'snapshot';
+      try {
+        const path = await platform.save(text, {
+          defaultName: `${suggestedName('txt').replace('.txt', '')}-${safe}-changes.txt`,
+          kind: 'text',
+        });
+        if (path) toast(`Exported ${baseName(path)}.`);
+      } catch (error) {
+        platform.error({
+          message: 'Could not export the Revision Room report.',
+          detail: String(error.message || error),
+        });
+      }
+    },
+    toast,
+  });
 }
 
 function jumpToFormatIssue(issue) {

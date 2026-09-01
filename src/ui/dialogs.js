@@ -40,6 +40,14 @@ import {
   ensureProductionItem,
   removeProductionTags,
 } from '../core/production.js';
+import {
+  MAX_SNAPSHOTS,
+  compareSnapshotToDocument,
+  createRevisionSnapshot,
+  deleteRevisionSnapshot,
+  restoreRevisionSnapshot,
+  revisionChangeReportText,
+} from '../features/snapshots.js';
 
 /* ------------------------------------------------------------------ *
  * Tiny DOM builder
@@ -628,6 +636,273 @@ export function revisionsDialog(editor, toast) {
 function today() {
   const d = new Date();
   return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Revision Room snapshots
+ * ------------------------------------------------------------------ */
+
+export function revisionRoomDialog(
+  editor,
+  { confirm, normalizeState, onExportReport, onGoTo, toast } = {}
+) {
+  let selectedId = editor.doc.revisionRoom.snapshots.at(-1)?.id || null;
+  let comparison = null;
+  const nameInput = h('input', {
+    type: 'text',
+    maxlength: '120',
+    value: `Snapshot ${editor.doc.revisionRoom.snapshots.length + 1}`,
+  });
+  const noteInput = h('textarea', { maxlength: '2000', rows: '2', placeholder: 'Optional note' });
+  const list = h('div', { class: 'snapshot-list' });
+  const results = h('div', {
+    class: 'snapshot-results',
+    role: 'region',
+    'aria-label': 'Snapshot comparison results',
+  });
+  const resultStatus = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+  const counter = h('div', { class: 'hint' });
+
+  const selectedSnapshot = () =>
+    editor.doc.revisionRoom.snapshots.find((snapshot) => snapshot.id === selectedId) || null;
+
+  const drawResults = () => {
+    results.innerHTML = '';
+    if (!comparison) {
+      resultStatus.textContent = 'No snapshot comparison is open.';
+      results.appendChild(
+        h('div', { class: 'side-empty' }, 'Choose a snapshot and compare it with the screenplay on screen.')
+      );
+      return;
+    }
+    const c = comparison;
+    resultStatus.textContent =
+      `Comparison ready: ${c.counts.added} added, ${c.counts.removed} removed, ` +
+      `${c.counts.changed} changed, and ${c.counts.moved} moved.`;
+    results.appendChild(
+      h(
+        'div',
+        { class: 'snapshot-summary' },
+        h('span', {}, `${c.counts.added} added`),
+        h('span', {}, `${c.counts.removed} removed`),
+        h('span', {}, `${c.counts.changed} changed`),
+        h('span', {}, `${c.counts.moved} moved`)
+      )
+    );
+    if (c.documentChanges.length) {
+      results.appendChild(
+        h('p', { class: 'hint' }, `Document settings changed: ${c.documentChanges.join(', ')}`)
+      );
+    }
+    if (!c.changes.length) {
+      results.appendChild(h('div', { class: 'side-empty' }, 'No screenplay-element differences.'));
+      return;
+    }
+    const rows = h('div', { class: 'snapshot-changes' });
+    for (const entry of c.changes) {
+      const targetId = editor.doc.elements.some((element) => element.id === entry.elementId)
+        ? entry.elementId
+        : null;
+      const row = h(
+        targetId ? 'button' : 'div',
+        targetId
+          ? { type: 'button', class: 'snapshot-change', onClick: () => onGoTo?.(targetId) }
+          : { class: 'snapshot-change' },
+        h('span', { class: `snapshot-kind ${entry.kind}` }, entry.kind),
+        h(
+          'span',
+          { class: 'snapshot-copy' },
+          h('b', {}, entry.afterScene || entry.beforeScene || 'Before first scene'),
+          h('span', {}, (entry.afterText || entry.beforeText || '(empty)').slice(0, 160)),
+          entry.fields?.length ? h('small', {}, entry.fields.join(', ')) : null
+        )
+      );
+      rows.appendChild(row);
+    }
+    results.appendChild(rows);
+  };
+
+  const rebuild = () => {
+    const snapshots = editor.doc.revisionRoom.snapshots;
+    counter.textContent = `${snapshots.length} of ${MAX_SNAPSHOTS} snapshots. They are stored locally in the screenplay and recovery data, and never uploaded by Scriptum.`;
+    list.innerHTML = '';
+    if (!snapshots.length) {
+      list.appendChild(h('div', { class: 'side-empty' }, 'No snapshots yet. Make one before a rewrite or major cut.'));
+    }
+    for (const snapshot of [...snapshots].reverse()) {
+      list.appendChild(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `snapshot-row${snapshot.id === selectedId ? ' active' : ''}`,
+            'aria-pressed': String(snapshot.id === selectedId),
+            onClick: () => {
+              selectedId = snapshot.id;
+              comparison = null;
+              rebuild();
+              drawResults();
+              list.querySelector('.snapshot-row.active')?.focus();
+            },
+          },
+          h('b', {}, snapshot.name),
+          h('span', {}, new Date(snapshot.created).toLocaleString()),
+          snapshot.note ? h('small', {}, snapshot.note) : null,
+          h('small', {}, `${snapshot.state.elements?.length || 0} elements`)
+        )
+      );
+    }
+  };
+
+  const controls = h(
+    'div',
+    { class: 'snapshot-controls' },
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn primary',
+        onClick: () => {
+          if (editor.doc.revisionRoom.snapshots.length >= MAX_SNAPSHOTS) {
+            toast?.(`Delete a snapshot before adding another; the limit is ${MAX_SNAPSHOTS}.`);
+            return;
+          }
+          let result;
+          editor.commit(() => {
+            result = createRevisionSnapshot(editor.doc, {
+              name: nameInput.value,
+              note: noteInput.value,
+            });
+            return null;
+          });
+          if (!result?.ok) {
+            toast?.(result?.reason || 'Could not create that snapshot.');
+            return;
+          }
+          selectedId = result.snapshot.id;
+          comparison = null;
+          nameInput.value = `Snapshot ${editor.doc.revisionRoom.snapshots.length + 1}`;
+          noteInput.value = '';
+          rebuild();
+          drawResults();
+          list.querySelector('.snapshot-row.active')?.focus();
+          toast?.(`Saved “${result.snapshot.name}”.`);
+        },
+      },
+      'Make Snapshot'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          comparison = compareSnapshotToDocument(snapshot, editor.doc);
+          drawResults();
+        },
+      },
+      'Compare to Current'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot || !comparison) return toast?.('Compare a snapshot before exporting its report.');
+          onExportReport?.(revisionChangeReportText(comparison, snapshot.name), snapshot.name);
+        },
+      },
+      'Export Report'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: async () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          if (editor.doc.revisionRoom.snapshots.length >= MAX_SNAPSHOTS) {
+            return toast?.('Delete one snapshot first so Scriptum can make a safety copy before restoring.');
+          }
+          const choice = await confirm?.({
+            message: `Restore “${snapshot.name}”?`,
+            detail: 'Scriptum will first make an automatic safety snapshot of the screenplay on screen.',
+            buttons: ['Restore Snapshot', 'Cancel'],
+            defaultId: 1,
+          });
+          if (choice !== 0) return;
+          let result;
+          editor.commit(() => {
+            result = restoreRevisionSnapshot(editor.doc, snapshot.id, { normalizeState });
+            return null;
+          }, { rebuildVocab: true });
+          if (!result?.ok) return toast?.(result?.reason || 'Could not restore that snapshot.');
+          editor.hardRender(null);
+          comparison = null;
+          selectedId = snapshot.id;
+          rebuild();
+          drawResults();
+          toast?.(`Restored “${snapshot.name}”; a safety snapshot was saved.`);
+        },
+      },
+      'Restore'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn danger',
+        onClick: async () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          const choice = await confirm?.({
+            message: `Delete “${snapshot.name}”?`,
+            detail: 'This removes only the saved checkpoint, not the screenplay on screen.',
+            buttons: ['Delete Snapshot', 'Cancel'],
+            defaultId: 1,
+          });
+          if (choice !== 0) return;
+          editor.commit(() => {
+            deleteRevisionSnapshot(editor.doc, snapshot.id);
+            return null;
+          });
+          selectedId = editor.doc.revisionRoom.snapshots.at(-1)?.id || null;
+          comparison = null;
+          rebuild();
+          drawResults();
+        },
+      },
+      'Delete'
+    )
+  );
+
+  const body = h(
+    'div',
+    { class: 'revision-room' },
+    h(
+      'div',
+      { class: 'snapshot-create' },
+      field('Snapshot name', nameInput),
+      field('Note', noteInput),
+      controls,
+      counter
+    ),
+    resultStatus,
+    h('div', { class: 'snapshot-columns' }, list, results)
+  );
+  rebuild();
+  drawResults();
+  openDialog({
+    title: 'Revision Room',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+  });
 }
 
 /* ------------------------------------------------------------------ *
