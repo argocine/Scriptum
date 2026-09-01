@@ -13,6 +13,7 @@ import { ScriptEditor, inferElements } from './ui/editor.js';
 import { CardBoard } from './features/cards.js';
 import { StoryTimeline } from './features/story-timeline.js';
 import { documentHasStoryMap } from './features/story.js';
+import { WritingSprint, formatSprintTime } from './features/sprint.js';
 import { Finder } from './features/find.js';
 import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
@@ -38,6 +39,7 @@ import {
   revisionsDialog,
   revisionRoomDialog,
   storyEntryDialog,
+  sprintSetupDialog,
   reportsDialog,
   formatAssistantDialog,
   productionTagDialog,
@@ -159,6 +161,12 @@ const dom = {
   stElement: document.getElementById('st-element'),
   zoom: document.getElementById('zoom-range'),
   zoomLabel: document.getElementById('zoom-label'),
+  focusHud: document.getElementById('focus-hud'),
+  focusTime: document.getElementById('focus-time'),
+  focusWords: document.getElementById('focus-words'),
+  focusProgress: document.getElementById('focus-progress'),
+  focusProgressFill: document.getElementById('focus-progress-fill'),
+  focusAnnouncer: document.getElementById('focus-announcer'),
 };
 
 const state = {
@@ -169,6 +177,8 @@ const state = {
   theme: storedTheme(),
   cardsOpen: false,
   boardMode: 'cards',
+  focusMode: false,
+  sprintStatus: 'idle',
   recoveryEnabled: true,
 };
 
@@ -190,6 +200,8 @@ const timeline = new StoryTimeline(dom.storyTimeline, editor, {
   onEditLane: (id) => openStoryEntry('lane', id),
   onEditBeat: (id) => openStoryEntry('beat', id),
 });
+const sprint = new WritingSprint();
+let sprintTimer = null;
 
 /* ------------------------------------------------------------------ *
  * Boot
@@ -199,6 +211,7 @@ function boot() {
   applyTheme(state.theme);
   buildElementSelect();
   wireToolbar();
+  wireFocusControls();
   wireBoardTabs();
   wireSidebar();
   wireFindBar();
@@ -217,6 +230,7 @@ function boot() {
   setInterval(() => {
     if (state.dirty && state.recoveryEnabled) writeAutosave(editor.doc, state.filePath);
   }, 20000);
+  updateSprintHud();
 
   window.addEventListener('beforeunload', (e) => {
     if (!state.dirty) return;
@@ -296,8 +310,39 @@ function wireToolbar() {
   on('tb-format-assistant', openFormatAssistant);
   on('tb-reports', openReports);
   on('tb-title', () => titlePageDialog(editor));
+  on('tb-focus', toggleFocusMode);
+  on('tb-sprint', openSprintSetup);
   on('tb-privacy', privacyDialog);
   on('tb-pdf', exportPdf);
+}
+
+function wireFocusControls() {
+  document.getElementById('focus-start').addEventListener('click', openSprintSetup);
+  document.getElementById('focus-pause').addEventListener('click', toggleSprintPause);
+  document.getElementById('focus-end').addEventListener('click', finishWritingSprint);
+  document.getElementById('focus-exit').addEventListener('click', toggleFocusMode);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'F6' && !dom.focusHud.hidden) {
+      event.preventDefault();
+      if (event.shiftKey || dom.focusHud.contains(document.activeElement)) {
+        dom.pages.focus();
+      } else {
+        const target = [...dom.focusHud.querySelectorAll('button')].find(
+          (button) => !button.hidden && !button.disabled
+        );
+        target?.focus();
+      }
+      return;
+    }
+    if (
+      event.key === 'Escape' &&
+      state.focusMode &&
+      document.getElementById('overlay').classList.contains('hidden')
+    ) {
+      event.preventDefault();
+      setFocusMode(false);
+    }
+  });
 }
 
 function wireBoardTabs() {
@@ -428,6 +473,7 @@ function wireFindBar() {
 }
 
 function openFind() {
+  if (state.focusMode) setFocusMode(false);
   dom.findbar.classList.add('open');
   const input = document.getElementById('find-input');
   input.focus();
@@ -498,6 +544,10 @@ function wireMenus() {
   m('menu:toggle-sidebar', toggleSidebar);
   m('menu:cards', () => toggleCards('cards'));
   m('menu:timeline', () => toggleCards('timeline'));
+  m('menu:focus', toggleFocusMode);
+  m('menu:sprint', openSprintSetup);
+  m('menu:sprint-pause', toggleSprintPause);
+  m('menu:sprint-end', finishWritingSprint);
   m('menu:reports', openReports);
   m('menu:zoom-in', () => setZoom(state.zoom + 10));
   m('menu:zoom-out', () => setZoom(state.zoom - 10));
@@ -526,6 +576,26 @@ function wireMenus() {
       toggleCards('cards');
       return;
     }
+    if (k === 'f' && e.shiftKey) {
+      e.preventDefault();
+      toggleFocusMode();
+      return;
+    }
+    if (k === 'k' && e.shiftKey) {
+      e.preventDefault();
+      openSprintSetup();
+      return;
+    }
+    if (k === ' ' && e.shiftKey) {
+      e.preventDefault();
+      toggleSprintPause();
+      return;
+    }
+    if (k === 'e' && e.shiftKey) {
+      e.preventDefault();
+      finishWritingSprint();
+      return;
+    }
     if (map[k] && !(k === 'b' || k === 'i' || k === 'u')) {
       e.preventDefault();
       map[k]();
@@ -542,6 +612,7 @@ function privacyDialog() {
     {},
     h('p', {}, 'Scriptum has no accounts, analytics, advertising, telemetry, cloud sync, or crash reporting.'),
     h('p', {}, 'Your screenplay is read only when you choose a file and written only to a destination you choose.'),
+    h('p', {}, 'Writing-sprint time and word progress stay in memory only and are discarded when the session ends or Scriptum quits.'),
     h('p', {}, recovery),
     h('p', { class: 'hint' }, 'The hosted browser version is delivered by GitHub Pages, whose normal web-server privacy terms apply.')
   );
@@ -580,6 +651,7 @@ async function confirmDiscard() {
 
 async function newDocument() {
   if (!(await confirmDiscard())) return;
+  resetWritingSprint();
   editor.load(createDocument());
   state.filePath = null;
   clearAutosave();
@@ -616,6 +688,7 @@ function loadFromText(path, data) {
     else doc = data.trimStart().startsWith('{') ? parseProject(data) : parseFountain(data);
 
     clearAutosave();
+    resetWritingSprint();
     editor.load(doc);
     state.filePath = ext === 'scriptum' ? path : null; // imports save to a new file
     markClean();
@@ -962,6 +1035,7 @@ function toggleSidebar() {
 }
 
 function toggleCards(mode = 'cards') {
+  if (state.focusMode) setFocusMode(false);
   if (state.cardsOpen && state.boardMode === mode) {
     closeBoard();
     return;
@@ -1011,6 +1085,126 @@ function syncBoardMode() {
   else timeline.render();
 }
 
+function toggleFocusMode() {
+  setFocusMode(!state.focusMode);
+}
+
+function setFocusMode(enabled) {
+  state.focusMode = !!enabled;
+  if (state.focusMode) {
+    if (state.cardsOpen) closeBoard();
+    if (dom.findbar.classList.contains('open')) closeFind();
+  }
+  document.body.classList.toggle('focus-mode', state.focusMode);
+  const button = document.getElementById('tb-focus');
+  button.classList.toggle('active', state.focusMode);
+  button.setAttribute('aria-pressed', String(state.focusMode));
+  updateSprintHud();
+  dom.pages.focus();
+}
+
+function openSprintSetup() {
+  if (sprint.status !== 'idle') {
+    setFocusMode(true);
+    return;
+  }
+  sprintSetupDialog({ onStart: startWritingSprint });
+}
+
+function startWritingSprint(settings) {
+  const words = editor.stats().words;
+  sprint.start(settings, words);
+  state.sprintStatus = 'running';
+  document.body.classList.add('sprint-active');
+  clearInterval(sprintTimer);
+  sprintTimer = setInterval(updateSprintHud, 500);
+  setFocusMode(true);
+  announceSprint('Writing sprint started.');
+}
+
+function toggleSprintPause() {
+  const words = editor.stats().words;
+  if (sprint.status === 'running') {
+    sprint.pause(words);
+    announceSprint('Writing sprint paused.');
+  } else if (sprint.status === 'paused') {
+    sprint.resume(words);
+    announceSprint('Writing sprint resumed.');
+  }
+  updateSprintHud();
+  dom.pages.focus();
+}
+
+function finishWritingSprint({ silent = false } = {}) {
+  if (sprint.status === 'idle') return;
+  const final = sprint.status === 'completed'
+    ? sprint.snapshot(editor.stats().words)
+    : sprint.end(editor.stats().words);
+  sprint.reset();
+  state.sprintStatus = 'idle';
+  clearInterval(sprintTimer);
+  sprintTimer = null;
+  document.body.classList.remove('sprint-active');
+  updateSprintHud();
+  if (!silent) {
+    toast(`Sprint finished — ${final.wordsWritten} word${final.wordsWritten === 1 ? '' : 's'} written.`);
+    announceSprint(`Writing sprint finished with ${final.wordsWritten} words written.`);
+    if (state.focusMode) dom.pages.focus();
+    else document.getElementById('tb-sprint').focus();
+  }
+}
+
+function resetWritingSprint() {
+  finishWritingSprint({ silent: true });
+}
+
+function updateSprintHud() {
+  const snapshot = sprint.snapshot(editor.stats().words);
+  const hasSession = snapshot.status !== 'idle';
+  if (snapshot.status === 'completed' && state.sprintStatus !== 'completed') {
+    clearInterval(sprintTimer);
+    sprintTimer = null;
+    toast(`Time — ${snapshot.wordsWritten} word${snapshot.wordsWritten === 1 ? '' : 's'} written.`);
+    announceSprint(`Time is up. ${snapshot.wordsWritten} words written.`);
+  }
+  state.sprintStatus = snapshot.status;
+  document.body.classList.toggle('sprint-active', hasSession);
+  dom.focusHud.hidden = !state.focusMode && !hasSession;
+  dom.focusTime.textContent = hasSession ? formatSprintTime(snapshot.remainingMs) : 'Focus';
+  dom.focusWords.textContent = hasSession
+    ? snapshot.wordTarget
+      ? `${snapshot.wordsWritten} / ${snapshot.wordTarget}`
+      : `${snapshot.wordsWritten} written`
+    : 'No sprint';
+  const percent = Math.round(snapshot.progress * 100);
+  dom.focusProgress.setAttribute('aria-valuenow', String(percent));
+  dom.focusProgress.setAttribute(
+    'aria-valuetext',
+    hasSession
+      ? `${percent} percent; ${snapshot.wordsWritten} words written; ${formatSprintTime(snapshot.remainingMs)} remaining`
+      : 'No writing sprint in progress'
+  );
+  dom.focusProgressFill.style.width = `${percent}%`;
+  document.getElementById('focus-start').hidden = hasSession;
+  const pause = document.getElementById('focus-pause');
+  pause.hidden = !sprint.isActive();
+  pause.textContent = snapshot.status === 'paused' ? 'Resume' : 'Pause';
+  const end = document.getElementById('focus-end');
+  end.hidden = !hasSession;
+  end.textContent = snapshot.status === 'completed' ? 'Dismiss' : 'End Sprint';
+  document.getElementById('focus-exit').textContent = state.focusMode ? 'Exit Focus' : 'Return to Focus';
+  const sprintButton = document.getElementById('tb-sprint');
+  sprintButton.classList.toggle('active', hasSession);
+  sprintButton.setAttribute('aria-pressed', String(hasSession));
+}
+
+function announceSprint(message) {
+  dom.focusAnnouncer.textContent = '';
+  requestAnimationFrame(() => {
+    dom.focusAnnouncer.textContent = message;
+  });
+}
+
 function applyTheme(theme) {
   state.theme = theme;
   document.body.classList.toggle('theme-dark', theme === 'dark');
@@ -1048,6 +1242,7 @@ function onEditorUpdate(ed, extra) {
   // not flag the file as edited — otherwise every quit asks about saving work
   // that was never done.
   if (!extra?.viewOnly) markDirty();
+  if (sprint.status !== 'idle') updateSprintHud();
   refreshStatus();
   clearTimeout(sidebarTimer);
   sidebarTimer = setTimeout(refreshSidebar, 180);

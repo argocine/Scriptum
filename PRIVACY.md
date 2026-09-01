@@ -7,10 +7,14 @@ The application does not collect, transmit, sell, or share personal data or
 screenplay content. It contains no analytics, advertising, telemetry, cloud
 sync, crash reporting, or tracking code.
 
-Alternate dialogue, production tags, and Revision Room snapshots are part of
-the screenplay document. They are saved inside the local `.scriptum` file and,
-while work is unsaved, may also be present in the local crash-recovery copy
-described below. Scriptum never uploads these features or their contents.
+Alternate dialogue, production tags, Revision Room snapshots, and Story
+Timeline planning are part of the screenplay document. They are saved inside
+the local `.scriptum` file and, while work is unsaved, may also be present in
+the local crash-recovery copy described below. Scriptum never uploads these
+features or their contents.
+
+Focus Mode and writing-sprint progress are session-only. Timer and word-goal
+values stay in memory and are discarded when the sprint ends or the app quits.
 
 ## Desktop application
 

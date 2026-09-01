@@ -329,6 +329,95 @@ textarea {
 }
 
 /* ------------------------------------------------------------------ *
+ * Focus mode / writing sprints
+ * ------------------------------------------------------------------ */
+
+.focus-mode #toolbar,
+.focus-mode #sidebar,
+.focus-mode #statusbar,
+.focus-mode #findbar {
+  display: none;
+}
+.focus-mode #script-scroll {
+  padding-top: 56px;
+}
+#focus-hud {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 28px);
+  padding: 7px 8px 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  box-shadow: 0 8px 28px rgba(15, 20, 30, 0.14);
+  backdrop-filter: blur(10px);
+}
+#focus-hud[hidden] {
+  display: none;
+}
+.focus-metric {
+  min-width: 66px;
+}
+.focus-metric span,
+.focus-metric strong {
+  display: block;
+}
+.focus-metric span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.focus-metric strong {
+  margin-top: 1px;
+  color: var(--fg);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.focus-progress {
+  width: 92px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 99px;
+  background: var(--border);
+}
+#focus-progress-fill {
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (max-width: 760px) {
+  #focus-hud {
+    left: 10px;
+    right: 10px;
+    flex-wrap: wrap;
+  }
+  .focus-progress {
+    flex: 1 1 100px;
+  }
+}
+
+/* ------------------------------------------------------------------ *
  * Status bar
  * ------------------------------------------------------------------ */
 

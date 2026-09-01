@@ -60,6 +60,12 @@
           <button class="btn" id="tb-title" title="Title page">Title Page</button>
         </div>
 
+        <div class="tb-sep"></div>
+        <div class="tb-group">
+          <button class="btn" id="tb-focus" title="Distraction-free writing (⌘⇧F)" aria-pressed="false">Focus</button>
+          <button class="btn" id="tb-sprint" title="Start a timed writing sprint (⌘⇧K)" aria-pressed="false">Sprint</button>
+        </div>
+
         <div style="flex: 1"></div>
 
         <div class="tb-group">
@@ -106,6 +112,26 @@
             <div class="card-grid board-pane active" id="card-grid" role="tabpanel" aria-labelledby="board-tab-cards"></div>
             <div class="board-pane" id="story-timeline" role="tabpanel" aria-labelledby="board-tab-timeline"></div>
           </div>
+
+          <section id="focus-hud" aria-label="Focus mode and writing sprint" hidden>
+            <span class="sr-only">Press F6 to move between the screenplay and these controls.</span>
+            <div class="focus-metric">
+              <span>Time</span>
+              <strong id="focus-time">25:00</strong>
+            </div>
+            <div class="focus-metric">
+              <span>Words</span>
+              <strong id="focus-words">0 / 500</strong>
+            </div>
+            <div class="focus-progress" id="focus-progress" role="progressbar" aria-label="Writing sprint progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="focus-progress-fill"></div>
+            </div>
+            <button class="btn" id="focus-start" type="button">Start Sprint</button>
+            <button class="btn" id="focus-pause" type="button" title="Pause or resume (⌘⇧Space)" hidden>Pause</button>
+            <button class="btn" id="focus-end" type="button" title="End sprint (⌘⇧E)" hidden>End Sprint</button>
+            <button class="btn" id="focus-exit" type="button">Exit Focus</button>
+            <span class="sr-only" id="focus-announcer" aria-live="polite"></span>
+          </section>
 
           <div id="findbar" role="search" aria-label="Find and replace">
             <input type="text" id="find-input" placeholder="Find" aria-label="Find" />

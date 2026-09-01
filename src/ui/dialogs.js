@@ -35,6 +35,11 @@ import {
 } from '../features/reports.js';
 import { auditDocument } from '../features/format-assistant.js';
 import {
+  MAX_SPRINT_MINUTES,
+  MAX_SPRINT_WORD_TARGET,
+  MIN_SPRINT_MINUTES,
+} from '../features/sprint.js';
+import {
   addProductionCategory,
   applyProductionTag,
   ensureProductionItem,
@@ -108,7 +113,7 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
     document.removeEventListener('keydown', onKey);
     closeCurrent = null;
     onClose?.();
-    if (previousFocus?.isConnected) previousFocus.focus();
+    if (previousFocus?.isConnected && previousFocus.getClientRects().length) previousFocus.focus();
   };
   closeCurrent = close;
 
@@ -1720,6 +1725,66 @@ export function lockScenesAction(editor, toast) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Focus mode / writing sprints
+ * ------------------------------------------------------------------ */
+
+export function sprintSetupDialog({ onStart } = {}) {
+  let durationMinutes = 25;
+  let wordTarget = 500;
+  let pendingStart = null;
+  const body = h(
+    'div',
+    {},
+    h(
+      'p',
+      { class: 'hint', style: { marginTop: '0' } },
+      'Set a quiet block of writing time. Sprint progress stays in memory and is discarded when the session ends.'
+    ),
+    h(
+      'div',
+      { class: 'row' },
+      field(
+        'Minutes',
+        numberInput(durationMinutes, (value) => (durationMinutes = value), {
+          min: String(MIN_SPRINT_MINUTES),
+          max: String(MAX_SPRINT_MINUTES),
+          step: '1',
+          required: true,
+        }),
+        `${MIN_SPRINT_MINUTES}–${MAX_SPRINT_MINUTES} minutes`
+      ),
+      field(
+        'Word target',
+        numberInput(wordTarget, (value) => (wordTarget = value), {
+          min: '0',
+          max: String(MAX_SPRINT_WORD_TARGET),
+          step: '25',
+          required: true,
+        }),
+        'Use 0 for a timer-only session'
+      )
+    )
+  );
+  openDialog({
+    title: 'Start a Writing Sprint',
+    body,
+    buttons: [
+      { label: 'Cancel' },
+      {
+        label: 'Begin Sprint',
+        primary: true,
+        onClick: () => {
+          pendingStart = { durationMinutes, wordTarget };
+        },
+      },
+    ],
+    onClose: () => {
+      if (pendingStart) onStart?.(pendingStart);
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ *
  * Keyboard shortcuts
  * ------------------------------------------------------------------ */
 
@@ -1750,6 +1815,11 @@ export function shortcutsDialog() {
         ['⌘J', 'Go to scene'],
         ['⌘\\', 'Toggle sidebar'],
         ['⌘⇧B', 'Index cards'],
+        ['⌘⇧F', 'Focus mode'],
+        ['⌘⇧K', 'Writing sprint'],
+        ['F6', 'Move between the screenplay and sprint controls'],
+        ['⌘⇧Space', 'Pause or resume a sprint'],
+        ['⌘⇧E', 'End a sprint'],
         ['⌘R', 'Reports'],
       ],
     ],
