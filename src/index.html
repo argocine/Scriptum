@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'none'; base-uri 'none'; object-src 'none'; frame-src 'none'; form-action 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:;"
+    />
+    <meta name="referrer" content="no-referrer" />
+    <title>Scriptum</title>
+    <link rel="stylesheet" href="styles/app.css" />
+    <link rel="stylesheet" href="styles/script.css" />
+  </head>
+  <body>
+    <div id="app">
+      <div id="titlebar">
+        <span id="doc-title">Untitled</span>
+        <span id="doc-dirty"></span>
+      </div>
+
+      <div id="toolbar" role="toolbar" aria-label="Screenplay formatting and tools">
+        <div class="tb-group">
+          <button class="btn icon" id="tb-sidebar" title="Toggle sidebar (⌘\)" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
+        </div>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <select id="element-select" title="Element type" aria-label="Element type"></select>
+        </div>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <button class="btn icon" id="tb-bold" title="Bold (⌘B)" aria-label="Bold"><b>B</b></button>
+          <button class="btn icon" id="tb-italic" title="Italic (⌘I)" aria-label="Italic"><i>I</i></button>
+          <button class="btn icon" id="tb-underline" title="Underline (⌘U)" aria-label="Underline"><u>U</u></button>
+        </div>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <button class="btn" id="tb-dual" title="Make this speech dual dialogue">Dual</button>
+          <button class="btn" id="tb-note" title="Add a note to this element">Note</button>
+          <button class="btn" id="tb-omit" title="Mark scene omitted">Omit</button>
+        </div>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <button class="btn" id="tb-cards" title="Index cards (⌘⇧B)">Cards</button>
+          <button class="btn" id="tb-find" title="Find &amp; Replace (⌘F)">Find</button>
+        </div>
+        <div class="tb-sep"></div>
+
+        <div class="tb-group">
+          <button class="btn" id="tb-revision" title="Revision sets">Revisions</button>
+          <button class="btn" id="tb-reports" title="Reports">Reports</button>
+          <button class="btn" id="tb-title" title="Title page">Title Page</button>
+        </div>
+
+        <div style="flex: 1"></div>
+
+        <div class="tb-group">
+          <button class="btn" id="tb-privacy" title="Privacy and local recovery data">Privacy</button>
+          <button class="btn primary" id="tb-pdf" title="Export PDF (⌘P)">Export PDF</button>
+        </div>
+      </div>
+
+      <div id="main">
+        <aside id="sidebar">
+          <div class="side-tabs" role="tablist" aria-label="Screenplay navigator">
+            <button class="side-tab active" id="tab-scenes" role="tab" aria-selected="true" aria-controls="pane-scenes" data-pane="scenes">Scenes</button>
+            <button class="side-tab" id="tab-characters" role="tab" aria-selected="false" aria-controls="pane-characters" data-pane="characters">Characters</button>
+            <button class="side-tab" id="tab-notes" role="tab" aria-selected="false" aria-controls="pane-notes" data-pane="notes">Notes</button>
+          </div>
+          <div class="side-body">
+            <div class="side-pane active" id="pane-scenes" role="tabpanel" aria-labelledby="tab-scenes"></div>
+            <div class="side-pane" id="pane-characters" role="tabpanel" aria-labelledby="tab-characters"></div>
+            <div class="side-pane" id="pane-notes" role="tabpanel" aria-labelledby="tab-notes"></div>
+          </div>
+        </aside>
+
+        <div id="editor-area">
+          <div id="script-scroll">
+            <div
+              id="pages"
+              contenteditable="true"
+              role="textbox"
+              aria-label="Screenplay editor"
+              aria-multiline="true"
+              spellcheck="true"
+              autocorrect="off"
+              autocapitalize="off"
+            ></div>
+          </div>
+
+          <div id="cards-view" aria-label="Index cards" aria-hidden="true"><div class="card-grid" id="card-grid"></div></div>
+
+          <div id="findbar" role="search" aria-label="Find and replace">
+            <input type="text" id="find-input" placeholder="Find" aria-label="Find" />
+            <span id="find-count" role="status" aria-live="polite">0 / 0</span>
+            <button class="btn icon" id="find-prev" title="Previous (⇧⏎)" aria-label="Previous result">↑</button>
+            <button class="btn icon" id="find-next" title="Next (⏎)" aria-label="Next result">↓</button>
+            <button class="btn icon" id="find-close" title="Close (Esc)" aria-label="Close find and replace">✕</button>
+            <input type="text" id="replace-input" placeholder="Replace with" aria-label="Replace with" />
+            <button class="btn" id="find-replace">Replace</button>
+            <button class="btn" id="find-replace-all">All</button>
+            <label class="check" style="margin: 0"
+              ><input type="checkbox" id="find-case" /> Match case</label
+            >
+          </div>
+
+          <div id="autocomplete"></div>
+        </div>
+      </div>
+
+      <div id="statusbar" role="status" aria-live="polite">
+        <span id="st-page">Page 1 of 1</span>
+        <span id="st-scene"></span>
+        <span id="st-runtime"></span>
+        <span class="sp"></span>
+        <span id="st-words"></span>
+        <span id="st-element"></span>
+        <label style="display: flex; align-items: center; gap: 6px">
+          <span>Zoom</span>
+          <input type="range" id="zoom-range" min="60" max="180" step="5" value="100" />
+          <span id="zoom-label">100%</span>
+        </label>
+      </div>
+    </div>
+
+    <div class="overlay hidden" id="overlay">
+      <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1">
+        <h2 id="dialog-title"></h2>
+        <div class="body" id="dialog-body"></div>
+        <div class="foot" id="dialog-foot"></div>
+      </div>
+    </div>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

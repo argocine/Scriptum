@@ -1,0 +1,347 @@
+/**
+ * script.css — Page and element geometry.
+ *
+ * Courier at 16px has an advance width of exactly 9.6px, which at 96dpi is
+ * 10 characters per inch — identical to the PDF standard Courier used on
+ * export. Line height is 16px = 6 lines per inch. Because the metrics match
+ * the paginator's character arithmetic exactly, the browser's own line
+ * breaking lands on the same words the printed page will.
+ */
+
+:root {
+  --char-w: 9.6px;
+  --line-h: 16px;
+  --dpi: 96;
+
+  --paper-w: 816px; /* 8.5in */
+  --paper-h: 1056px; /* 11in  */
+  --margin-t: 96px;
+  --margin-b: 96px;
+
+  --paper-bg: #ffffff;
+  --paper-fg: #14161a;
+  --paper-shadow: 0 1px 3px rgba(0, 0, 0, 0.16), 0 12px 32px rgba(0, 0, 0, 0.1);
+}
+
+.theme-dark {
+  --paper-bg: #f7f5f0;
+  --paper-fg: #16181c;
+  --paper-shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Optional "night" script mode: dark paper for late-night writing. */
+.paper-night {
+  --paper-bg: #1c1f24;
+  --paper-fg: #e6e3dc;
+}
+
+/* ------------------------------------------------------------------ *
+ * The scrolling surface
+ * ------------------------------------------------------------------ */
+
+#script-scroll {
+  flex: 1;
+  overflow: auto;
+  background: var(--canvas);
+  padding: 32px 0 40vh;
+  scroll-behavior: auto;
+}
+
+#pages {
+  width: var(--paper-w);
+  margin: 0 auto;
+  transform-origin: top center;
+  outline: none;
+  caret-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------ *
+ * A page
+ * ------------------------------------------------------------------ */
+
+.page {
+  position: relative;
+  width: var(--paper-w);
+  height: var(--paper-h);
+  background: var(--paper-bg);
+  color: var(--paper-fg);
+  box-shadow: var(--paper-shadow);
+  margin: 0 auto 28px;
+  border-radius: 1px;
+  overflow: hidden;
+  font-family: 'Courier Prime', 'Courier New', Courier, monospace;
+  font-size: 16px;
+  line-height: var(--line-h);
+  font-variant-ligatures: none;
+  font-kerning: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Off-screen pages collapse to a placeholder of identical height so that
+   scrolling a 120-page script stays smooth. */
+.page.virtual {
+  background: var(--paper-bg);
+  opacity: 0.55;
+}
+
+.page-body {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--margin-t);
+  bottom: var(--margin-b);
+}
+
+.page-number {
+  position: absolute;
+  top: 48px; /* 0.5in */
+  right: 96px; /* 1in right margin */
+  font-size: 16px;
+  line-height: var(--line-h);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.page-revision-header {
+  position: absolute;
+  top: 48px;
+  left: 144px;
+  font-size: 16px;
+  line-height: var(--line-h);
+  user-select: none;
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+/* Page edge marker in the gutter, for orientation while scrolling. */
+.page-tab {
+  position: absolute;
+  top: 10px;
+  left: -58px;
+  font: 500 11px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  color: var(--muted);
+  user-select: none;
+  pointer-events: none;
+  letter-spacing: 0.04em;
+}
+
+/* ------------------------------------------------------------------ *
+ * Elements
+ *
+ * `--x` is the left edge in inches-as-pixels; `--w` is the width in
+ * characters. The half-pixel slack guarantees the browser fits exactly `--w`
+ * characters before wrapping and never one fewer.
+ * ------------------------------------------------------------------ */
+
+.el {
+  position: relative;
+  margin: 0;
+  padding: 0;
+  margin-left: var(--x);
+  width: calc(var(--w) * var(--char-w) + 0.5px);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  min-height: var(--line-h);
+  outline: none;
+}
+
+.el:empty::after {
+  content: '';
+  display: inline-block;
+}
+
+/* Case is a presentation rule. The model stores exactly what was typed, so
+   nothing is ever lost, and every export path applies the same transform. */
+.el[data-type='scene_heading'],
+.el[data-type='character'],
+.el[data-type='transition'],
+.el[data-type='shot'],
+.el[data-type='act_break'],
+.synth {
+  text-transform: uppercase;
+}
+.el[data-type='parenthetical'] {
+  text-transform: none;
+}
+
+.el[data-type='transition'] {
+  text-align: right;
+}
+.el[data-type='act_break'] {
+  text-align: center;
+  text-decoration: underline;
+}
+
+/* Gutter marks are positioned from JS using the resolved page geometry;
+   these values are only a sane fallback. */
+.scene-num,
+.revision-mark {
+  text-transform: none;
+}
+
+.el b,
+.el strong {
+  font-weight: 700;
+}
+.el i,
+.el em {
+  font-style: italic;
+}
+.el u {
+  text-decoration: underline;
+}
+
+/* Blank-line spacers between elements. */
+.spacer {
+  height: var(--line-h);
+  user-select: none;
+}
+.spacer[data-n='2'] {
+  height: calc(var(--line-h) * 2);
+}
+
+/* Synthetic, non-editable text the paginator inserts. */
+.synth {
+  margin-left: var(--x);
+  user-select: none;
+  white-space: pre;
+}
+
+/* ------------------------------------------------------------------ *
+ * Scene numbers, revision marks, notes
+ * ------------------------------------------------------------------ */
+
+.scene-num {
+  position: absolute;
+  top: 0;
+  font-size: 16px;
+  line-height: var(--line-h);
+  user-select: none;
+  pointer-events: none;
+  color: inherit;
+}
+.revision-mark {
+  position: absolute;
+  top: 0;
+  user-select: none;
+  pointer-events: none;
+  font-weight: 700;
+}
+
+.el[data-omitted='true'] {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.note-flag {
+  position: absolute;
+  left: -22px;
+  top: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: var(--note-color, #f2c94c);
+  cursor: pointer;
+  user-select: none;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+/* Highlight for find results and the current scene. */
+.hl-find {
+  background: #ffe27a;
+  color: #14161a;
+  border-radius: 2px;
+}
+.hl-find.current {
+  background: #ff9f43;
+}
+
+.el.scene-active::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0.5;
+}
+
+/* ------------------------------------------------------------------ *
+ * Dual dialogue
+ * ------------------------------------------------------------------ */
+
+.dual-row {
+  position: relative;
+  height: var(--line-h);
+}
+.dual-col {
+  position: absolute;
+  top: 0;
+  white-space: pre;
+}
+
+/* ------------------------------------------------------------------ *
+ * Title page
+ * ------------------------------------------------------------------ */
+
+.page.title-page .tp-block {
+  position: absolute;
+  left: 0;
+  right: 0;
+  text-align: center;
+  white-space: pre-wrap;
+}
+.tp-title {
+  top: 336px; /* 3.5in */
+  text-transform: uppercase;
+  text-decoration: underline;
+}
+.tp-credit {
+  top: 400px;
+}
+.tp-author {
+  top: 432px;
+}
+.tp-source {
+  top: 496px;
+}
+.tp-contact {
+  position: absolute;
+  left: 144px;
+  bottom: 96px;
+  text-align: left;
+  white-space: pre-wrap;
+}
+.tp-draft {
+  position: absolute;
+  right: 96px;
+  bottom: 96px;
+  text-align: right;
+  white-space: pre-wrap;
+}
+
+/* ------------------------------------------------------------------ *
+ * Print — used by the browser-print fallback path
+ * ------------------------------------------------------------------ */
+
+@media print {
+  #script-scroll {
+    padding: 0;
+    overflow: visible;
+  }
+  .page {
+    box-shadow: none;
+    margin: 0;
+    break-after: page;
+    border-radius: 0;
+  }
+  .page-tab,
+  .note-flag,
+  .el.scene-active::before {
+    display: none !important;
+  }
+}

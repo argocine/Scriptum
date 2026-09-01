@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+.DS_Store
+*.log
+
+# Exported work — keep screenplays out of the app's own repository.
+*.pdf
+*.scriptum
