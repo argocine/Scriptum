@@ -147,6 +147,9 @@ try {
   })()`);
 
   writeFileSync(output, Buffer.from(result.base64, 'base64'));
+  if (process.env.SCRIPTUM_PDF_QA_OUTPUT) {
+    writeFileSync(process.env.SCRIPTUM_PDF_QA_OUTPUT, readFileSync(output));
+  }
   const rawPdf = readFileSync(output, 'latin1');
   assert.match(rawPdf.slice(0, 8), /^%PDF-/);
 
@@ -179,10 +182,6 @@ try {
     assert.ok(fontRows.every((row) => /\byes\b/i.test(row)), 'every PDF font must be embedded');
   } else {
     assert.match(rawPdf, /\/FontFile[23]?\b|\/Subtype\s*\/Type3\b/);
-  }
-
-  if (process.env.SCRIPTUM_PDF_QA_OUTPUT) {
-    writeFileSync(process.env.SCRIPTUM_PDF_QA_OUTPUT, readFileSync(output));
   }
 
   cdp.close();

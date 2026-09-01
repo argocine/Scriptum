@@ -12,6 +12,13 @@ import { textClusters } from '../core/unicode.js';
 
 const LINE_HEIGHT_IN = 1 / 6;
 const TEXT_BASELINE_IN = 9.6 / 72;
+const BUNDLED_PDF_FONTS = [
+  ['Scriptum Noto Mono', 'AПривет'],
+  ['Scriptum Noto Mono CJK', '東京한'],
+  ['Scriptum Noto Devanagari', 'क्ष'],
+  ['Scriptum Noto Arabic', 'مرحبا'],
+  ['Scriptum Noto Hebrew', 'שלום'],
+];
 
 /** Build a serializable description of every mark that belongs on the PDF. */
 export function createPrintModel(doc, pagination, styles) {
@@ -137,7 +144,7 @@ export function mountPrintView(root, doc, pagination, styles) {
   let cleaned = false;
   return {
     model,
-    ready: document.fonts?.ready || Promise.resolve(),
+    ready: loadBundledPdfFonts(),
     cleanup() {
       if (cleaned) return;
       cleaned = true;
@@ -148,6 +155,15 @@ export function mountPrintView(root, doc, pagination, styles) {
       document.title = previousTitle;
     },
   };
+}
+
+async function loadBundledPdfFonts() {
+  if (!document.fonts?.load) return;
+  for (const [family, sample] of BUNDLED_PDF_FONTS) {
+    const loaded = await document.fonts.load(`12pt "${family}"`, sample);
+    if (!loaded.length) throw new Error(`Bundled PDF font failed to load: ${family}`);
+  }
+  await document.fonts.ready;
 }
 
 function printableLine(line, top, styles) {

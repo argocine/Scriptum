@@ -11,7 +11,8 @@
 - Story Timeline with acts, sequences, beats, lanes, and unplaced-scene review
 - Distraction-free Focus Mode and in-memory timed writing sprints
 - Local-only Table Read using voices explicitly marked on-device
-- Unicode-capable, searchable, tagged PDF output with embedded local fonts
+- Unicode-capable, searchable, tagged PDF output with bundled open-licensed
+  fallback fonts
 - Unicode grapheme-aware pagination for combining text, emoji, Indic conjuncts,
   Hangul Jamo, and full-width scripts
 
@@ -29,7 +30,7 @@
   browser quota failures visible
 - Added file-size and model-complexity limits for untrusted imports
 - Added signed GitHub build-provenance attestations and packaged
-  Electron/Chromium third-party notices
+  Electron/Chromium and bundled-font third-party notices
 
 ### Accessibility and platforms
 

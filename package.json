@@ -54,6 +54,14 @@
       {
         "from": "THIRD_PARTY_NOTICES.md",
         "to": "licenses/THIRD_PARTY_NOTICES.md"
+      },
+      {
+        "from": "src/assets/fonts/OFL-Noto.txt",
+        "to": "licenses/OFL-Noto.txt"
+      },
+      {
+        "from": "src/assets/fonts/OFL-Noto-CJK.txt",
+        "to": "licenses/OFL-Noto-CJK.txt"
       }
     ],
     "electronFuses": {

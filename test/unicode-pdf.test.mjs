@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { ElementType, resolveStyles } from '../src/core/format.js';
 import { createDocument, createElement } from '../src/core/model.js';
@@ -67,6 +68,32 @@ t('keeps screenplay geometry in physical inches', () => {
   const body = model.pages.at(-1).lines.find((line) => line.text.startsWith('Zoë'));
   assert.equal(body.x, styles.elements[ElementType.ACTION].left);
   assert.equal(body.top, styles.page.marginTop + 2 / 6);
+});
+
+t('ships open-licensed offline fallback fonts for the tested scripts', () => {
+  const stylesheet = fs.readFileSync(new URL('../src/styles/script.css', import.meta.url), 'utf8');
+  const printView = fs.readFileSync(new URL('../src/io/print-view.js', import.meta.url), 'utf8');
+  const fonts = new Map([
+    ['NotoSansMono-Regular.ttf', 'd9e2b23d19f8230be7146f409a52b1d23117e635e28f2e2892cf91b7382f325b'],
+    ['NotoSansMonoCJKsc-Regular.otf', 'ec04cc376b34887cedbdf84074e2e226ed2761eeabdcb9173fc1dd7bfd153ef7'],
+    ['NotoSansDevanagari-Regular.ttf', '385e78e6359a9d88a0f243d53b1209d7548361ba2194e2b9ec779bcaa7e8949d'],
+    ['NotoSansArabic-Regular.ttf', 'ceea25b464a656dc3b26849bab9356740401af62aedf1bfa8b7f0d9b75925b1b'],
+    ['NotoSansHebrew-Regular.ttf', 'a7fa16fffb27bedb060a0866267c29e9859aeb9c21cc33f5b3aaf6eb062eca85'],
+  ]);
+  for (const [font, expectedHash] of fonts) {
+    const bytes = fs.readFileSync(new URL(`../src/assets/fonts/${font}`, import.meta.url));
+    assert.ok(bytes.length > 20_000);
+    assert.equal(createHash('sha256').update(bytes).digest('hex'), expectedHash);
+    assert.match(stylesheet, new RegExp(font.replace('.', '\\.')));
+  }
+  assert.match(printView, /document\.fonts\.load/);
+  assert.match(printView, /Bundled PDF font failed to load/);
+  for (const license of ['OFL-Noto.txt', 'OFL-Noto-CJK.txt']) {
+    assert.match(
+      fs.readFileSync(new URL(`../src/assets/fonts/${license}`, import.meta.url), 'utf8'),
+      /SIL OPEN FONT LICENSE Version 1\.1/
+    );
+  }
 });
 
 t('exports screenplay text and emphasis, not private editor annotations', () => {

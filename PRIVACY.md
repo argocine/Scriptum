@@ -22,10 +22,10 @@ marked as remote or whose local status is unknown. It does not use the
 microphone, record audio, store voice assignments, or upload screenplay text.
 
 PDF export is rendered on the device by the bundled browser engine or the
-browser's print system. It may use and embed fonts already installed on the
-computer. Scriptum does not download fonts, contact a font service, or send the
-screenplay away for conversion. Private notes and production-tag annotations
-are not included in screenplay PDF output.
+browser's print system. Scriptum ships open-licensed Noto fallback fonts and may
+also use fonts already installed on the computer. It does not download fonts,
+contact a font service, or send the screenplay away for conversion. Private
+notes and production-tag annotations are not included in screenplay PDF output.
 
 ## Desktop application
 

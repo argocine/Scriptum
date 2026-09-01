@@ -93,10 +93,11 @@ Pagination is calculated in screenplay lines and monospaced character cells:
 - Action and dialogue keep at least two lines on either side of a page break
 
 PDF export is rendered locally by Chromium from the same pagination model.
-It embeds the local fonts it uses, produces searchable tagged text, and supports
-Unicode shaping for accents, non-Latin scripts, combining text, and emoji.
-Exact glyph coverage depends on the fonts installed on the computer; Scriptum
-does not download a font or send text to a font service.
+It includes open-licensed Noto fallback fonts for Latin, Cyrillic, CJK,
+Devanagari, Arabic, and Hebrew text, embeds the fonts it uses, and produces
+searchable tagged output. Other scripts and emoji can use fonts already
+installed on the computer. Scriptum never downloads a font or sends text to a
+font service.
 
 ## Your script is not our business
 
@@ -223,7 +224,7 @@ npm run test:app
 feature, and PDF-model suites. `npm run test:app` launches real Electron
 instances to verify quit safety and produce an actual Unicode PDF; when Poppler
 tools are available it also checks extracted text, page count, and embedded
-fonts.
+fonts. The CI matrix runs these checks on macOS, Windows, and Linux.
 
 Run the browser edition locally with:
 

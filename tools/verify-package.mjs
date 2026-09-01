@@ -19,7 +19,13 @@ if (!artifacts.length) throw new Error('The package build produced no distributa
 if (artifacts.some((file) => !path.basename(file).includes(pkg.version))) {
   throw new Error('A distributable artifact does not contain the package version in its name.');
 }
-for (const notice of ['ELECTRON-LICENSE.txt', 'LICENSES.chromium.html', 'THIRD_PARTY_NOTICES.md']) {
+for (const notice of [
+  'ELECTRON-LICENSE.txt',
+  'LICENSES.chromium.html',
+  'THIRD_PARTY_NOTICES.md',
+  'OFL-Noto.txt',
+  'OFL-Noto-CJK.txt',
+]) {
   if (!files.some((file) => path.basename(file) === notice)) {
     throw new Error(`Packaged third-party notice is missing: ${notice}`);
   }

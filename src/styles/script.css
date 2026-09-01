@@ -383,6 +383,46 @@
  * Unicode PDF / browser print surface
  * ------------------------------------------------------------------ */
 
+@font-face {
+  font-family: 'Scriptum Noto Mono';
+  src: url('../assets/fonts/NotoSansMono-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Scriptum Noto Mono CJK';
+  src: url('../assets/fonts/NotoSansMonoCJKsc-Regular.otf') format('opentype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Scriptum Noto Devanagari';
+  src: url('../assets/fonts/NotoSansDevanagari-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Scriptum Noto Arabic';
+  src: url('../assets/fonts/NotoSansArabic-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Scriptum Noto Hebrew';
+  src: url('../assets/fonts/NotoSansHebrew-Regular.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
 #pdf-print-root {
   display: none;
 }
@@ -397,6 +437,8 @@
   page-break-after: always;
   font-family:
     'Courier Prime', 'Courier New', 'Nimbus Mono PS', 'Liberation Mono',
+    'Scriptum Noto Mono', 'Scriptum Noto Mono CJK',
+    'Scriptum Noto Devanagari', 'Scriptum Noto Arabic', 'Scriptum Noto Hebrew',
     'Noto Sans Mono CJK SC', 'Noto Sans Mono', 'SFMono-Regular',
     'PingFang SC', 'Hiragino Sans', 'Yu Gothic', 'Malgun Gothic',
     'Noto Naskh Arabic', 'Geeza Pro', 'Arial Hebrew',
