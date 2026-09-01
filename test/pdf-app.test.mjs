@@ -162,11 +162,14 @@ try {
     assert.equal(pageObjects.length, result.pages, 'PDF page object count differs from the print model');
   }
 
-  const extracted = spawnSync('pdftotext', ['-layout', output, '-'], { encoding: 'utf8' });
+  const extracted = spawnSync('pdftotext', ['-enc', 'UTF-8', '-layout', output, '-'], { encoding: 'utf8' });
   if (!extracted.error) {
     assert.equal(extracted.status, 0, extracted.stderr);
     for (const expected of ['星の旅', 'José Núñez', 'CAFÉ 東京', 'Zoë meets 猫', 'Привет', 'क्ष', '한']) {
-      assert.ok(extracted.stdout.includes(expected), `PDF text did not preserve ${expected}`);
+      assert.ok(
+        extracted.stdout.includes(expected),
+        `PDF text did not preserve ${expected}. Extracted: ${JSON.stringify(extracted.stdout.slice(0, 1000))}`
+      );
     }
   } else {
     // Chromium's ToUnicode maps make embedded subset glyphs searchable and
