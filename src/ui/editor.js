@@ -31,8 +31,14 @@ import {
 import { paginate, assignSceneNumbers } from '../core/paginate.js';
 import { Renderer, cssEscape } from './render.js';
 import { buildVocabulary, suggest, previousSpeaker } from '../core/autocomplete.js';
+import {
+  addAlternate,
+  deleteActiveAlternate,
+  hasAlternateDialogue,
+  stepAlternate,
+} from '../core/alternates.js';
 
-const GUTTER_SELECTOR = '.scene-num, .revision-mark, .note-flag';
+const GUTTER_SELECTOR = '.scene-num, .revision-mark, .note-flag, .alt-controls';
 const TYPING_COALESCE_MS = 600;
 const HISTORY_LIMIT = 80;
 
@@ -434,6 +440,11 @@ export class ScriptEditor {
     const caret = this.getCaret();
     const id = elementId || caret?.elementId;
     if (!id) return;
+    const existing = getElement(this.doc, id);
+    if (hasAlternateDialogue(existing) && type !== ElementType.DIALOGUE) {
+      this.alternateNotice('Remove the stored alternate dialogue choices before changing this element type.');
+      return;
+    }
     this.commit(() => {
       const el = getElement(this.doc, id);
       if (!el) return null;
@@ -447,6 +458,19 @@ export class ScriptEditor {
   handleEnter() {
     const sel = this.getSelection();
     if (!sel) return;
+
+    if (this.selectionTouchesAlternates(sel) && !sel.collapsed) {
+      this.alternateNotice('That structural edit would remove stored alternate dialogue choices. Remove the choices first.');
+      return;
+    }
+    const selectedElement = getElement(this.doc, sel.start.elementId);
+    if (
+      hasAlternateDialogue(selectedElement) &&
+      (!sel.collapsed || (sel.start.offset > 0 && sel.start.offset < selectedElement.text.length))
+    ) {
+      this.alternateNotice('A dialogue with stored alternatives cannot be split. Move to the beginning or end, or remove the alternatives first.');
+      return;
+    }
 
     this.commit(() => {
       if (!sel.collapsed) this.deleteRangeInModel(sel);
@@ -538,6 +562,13 @@ export class ScriptEditor {
     if (!caret) return;
     const idx = indexOfElement(this.doc, caret.elementId);
     if (idx <= 0) return;
+    if (
+      hasAlternateDialogue(this.doc.elements[idx]) ||
+      hasAlternateDialogue(this.doc.elements[idx - 1])
+    ) {
+      this.alternateNotice('Remove stored alternate dialogue choices before merging these elements.');
+      return;
+    }
 
     this.commit(() => {
       const el = this.doc.elements[idx];
@@ -575,6 +606,13 @@ export class ScriptEditor {
     if (!caret) return;
     const idx = indexOfElement(this.doc, caret.elementId);
     if (idx === -1 || idx >= this.doc.elements.length - 1) return;
+    if (
+      hasAlternateDialogue(this.doc.elements[idx]) ||
+      hasAlternateDialogue(this.doc.elements[idx + 1])
+    ) {
+      this.alternateNotice('Remove stored alternate dialogue choices before merging these elements.');
+      return;
+    }
 
     this.commit(() => {
       const el = this.doc.elements[idx];
@@ -626,6 +664,57 @@ export class ScriptEditor {
     this.markRevised(first);
     this.doc.elements.splice(startIndex + 1, endIndex - startIndex);
     return { elementId: first.id, offset: head.length };
+  }
+
+  selectionTouchesAlternates(sel) {
+    if (!sel) return false;
+    return this.doc.elements
+      .slice(sel.startIndex, sel.endIndex + 1)
+      .some(hasAlternateDialogue);
+  }
+
+  alternateNotice(message) {
+    this.emit({ viewOnly: true, notice: message });
+  }
+
+  addAlternateDialogue(elementId = null) {
+    const caret = this.getCaret();
+    const id = elementId || caret?.elementId;
+    const element = id ? getElement(this.doc, id) : null;
+    if (!element || element.type !== ElementType.DIALOGUE) {
+      this.alternateNotice('Put the caret in a dialogue element to add an alternate.');
+      return false;
+    }
+    if (element.dual) {
+      this.alternateNotice('Alternate dialogue is not available inside a dual-dialogue pair.');
+      return false;
+    }
+    this.commit(() => {
+      addAlternate(element);
+      this.markRevised(element);
+      return { elementId: element.id, offset: 0 };
+    });
+    return true;
+  }
+
+  stepAlternateDialogue(elementId, direction) {
+    const element = getElement(this.doc, elementId);
+    if (!hasAlternateDialogue(element)) return false;
+    this.commit(() => {
+      stepAlternate(element, direction);
+      return { elementId: element.id, offset: Math.min(element.text.length, 0) };
+    }, { rebuildVocab: true });
+    return true;
+  }
+
+  deleteActiveAlternateDialogue(elementId) {
+    const element = getElement(this.doc, elementId);
+    if (!hasAlternateDialogue(element)) return false;
+    this.commit(() => {
+      deleteActiveAlternate(element);
+      return { elementId: element.id, offset: 0 };
+    }, { rebuildVocab: true });
+    return true;
   }
 
   /* ---------------- inline emphasis ---------------- */
@@ -706,6 +795,10 @@ export class ScriptEditor {
     const lines = text.replace(/\r\n?/g, '\n').split('\n');
     const sel = this.getSelection();
     if (!sel) return;
+    if (!sel.collapsed && this.selectionTouchesAlternates(sel) && sel.startIndex !== sel.endIndex) {
+      this.alternateNotice('That paste would remove stored alternate dialogue choices. Remove the choices first.');
+      return;
+    }
 
     // A single line pastes as plain text into the current element.
     if (lines.length === 1) {
@@ -719,6 +812,15 @@ export class ScriptEditor {
         this.markRevised(el);
         return { elementId: el.id, offset: caret.offset + lines[0].length };
       }, { rebuildVocab: true });
+      return;
+    }
+
+    const pasteHost = getElement(this.doc, sel.start.elementId);
+    if (
+      hasAlternateDialogue(pasteHost) &&
+      (!sel.collapsed || sel.start.offset < pasteHost.text.length)
+    ) {
+      this.alternateNotice('Multi-line paste cannot split dialogue that has stored alternatives.');
       return;
     }
 
@@ -754,6 +856,15 @@ export class ScriptEditor {
     const lines = raw.replace(/\r\n?/g, '\n').split('\n');
     const sel = this.getSelection();
     if (!sel) return;
+    if (!sel.collapsed && this.selectionTouchesAlternates(sel)) {
+      this.alternateNotice('That insertion would remove stored alternate dialogue choices. Remove the choices first.');
+      return;
+    }
+    const hostElement = getElement(this.doc, sel.start.elementId);
+    if (hasAlternateDialogue(hostElement) && sel.start.offset < hostElement.text.length) {
+      this.alternateNotice('A multi-line insertion cannot split dialogue that has stored alternatives.');
+      return;
+    }
 
     this.commit(() => {
       const caret = sel.collapsed
@@ -904,6 +1015,20 @@ export class ScriptEditor {
   }
 
   onClick(e) {
+    const alternate = e.target.closest?.('.alt-button');
+    if (alternate) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = alternate.dataset.elementId;
+      const action = alternate.dataset.altAction;
+      if (action === 'previous') this.stepAlternateDialogue(id, -1);
+      else if (action === 'next') this.stepAlternateDialogue(id, 1);
+      else if (action === 'add') this.addAlternateDialogue(id);
+      else if (action === 'remove') {
+        this.emit({ viewOnly: true, requestDeleteAlternate: id });
+      }
+      return;
+    }
     const flag = e.target.closest?.('.note-flag');
     if (flag) {
       e.preventDefault();
@@ -940,11 +1065,21 @@ export class ScriptEditor {
       'insertCompositionText',
       'deleteContentBackward',
       'deleteContentForward',
+      'deleteByCut',
+      'deleteByDrag',
       'insertParagraph',
       'insertFromPaste',
+      'insertFromDrop',
+      'insertReplacementText',
     ];
     if (!destructive.includes(e.inputType)) return;
     if (e.inputType === 'insertFromPaste') return; // handled by the paste event
+
+    if (this.selectionTouchesAlternates(sel)) {
+      e.preventDefault();
+      this.alternateNotice('That edit would remove stored alternate dialogue choices. Remove the choices first.');
+      return;
+    }
 
     e.preventDefault();
     const inserted = e.data || '';
@@ -961,6 +1096,11 @@ export class ScriptEditor {
   }
 
   onKeyDown(e) {
+    // Alternate controls are ordinary accessible buttons. Let Tab, Enter,
+    // Space, and arrow-key behavior remain native instead of treating them as
+    // screenplay-editing commands.
+    if (e.target.closest?.('.alt-controls')) return;
+
     const meta = e.metaKey || e.ctrlKey;
 
     // Autocomplete first — it owns the arrow keys while open.

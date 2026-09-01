@@ -16,6 +16,7 @@ import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
 import { exportPDF } from './io/pdf.js';
 import { pdfSupportIssues } from './features/format-assistant.js';
+import { documentHasAlternates, hasAlternateDialogue } from './core/alternates.js';
 import {
   serializeProject,
   parseProject,
@@ -259,6 +260,7 @@ function wireToolbar() {
   on('tb-italic', () => editor.toggleStyle('italic'));
   on('tb-underline', () => editor.toggleStyle('underline'));
   on('tb-dual', toggleDualDialogue);
+  on('tb-alt', () => editor.addAlternateDialogue());
   on('tb-note', () => {
     const el = editor.currentElement();
     if (el) notesDialog(editor, el.id);
@@ -401,8 +403,9 @@ function wireMenus() {
   m('menu:import-text', () => openFile(['text']));
 
   m('menu:export-pdf', exportPdf);
-  m('menu:export-fdx', () => exportText(toFDX(editor.doc), 'fdx'));
-  m('menu:export-fountain', () => exportText(toFountain(editor.doc), 'fountain'));
+  m('menu:export-fdx', () => exportInterchangeWithAlternates('fdx', () => toFDX(editor.doc)));
+  m('menu:export-fountain', () =>
+    exportInterchangeWithAlternates('fountain', () => toFountain(editor.doc)));
   m('menu:export-text', () =>
     exportText(toPlainText(editor.doc, editor.pagination, editor.styles), 'text'));
 
@@ -418,6 +421,7 @@ function wireMenus() {
   m('menu:italic', () => editor.toggleStyle('italic'));
   m('menu:underline', () => editor.toggleStyle('underline'));
   m('menu:dual', toggleDualDialogue);
+  m('menu:add-alternate', () => editor.addAlternateDialogue());
 
   for (const type of ELEMENT_ORDER) {
     m(`menu:type-${type}`, () => editor.setElementType(type));
@@ -605,6 +609,22 @@ async function exportText(text, kind) {
   if (path) toast(`Exported ${baseName(path)}.`);
 }
 
+async function exportInterchangeWithAlternates(kind, buildText) {
+  if (documentHasAlternates(editor.doc)) {
+    const label = kind === 'fdx' ? 'Final Draft' : 'Fountain';
+    const choice = await platform.confirm({
+      message: `Export the selected dialogue choices to ${label}?`,
+      detail:
+        `${label} export currently includes only the active version of each dialogue. ` +
+        'Inactive Scriptum alternatives remain safe in the .scriptum file.',
+      buttons: ['Export Active Choices', 'Cancel'],
+      defaultId: 1,
+    });
+    if (choice !== 0) return;
+  }
+  await exportText(buildText(), kind);
+}
+
 async function exportPdf() {
   try {
     const unsupported = pdfSupportIssues(editor.doc, editor.pagination);
@@ -666,6 +686,34 @@ function baseName(p) {
 function toggleDualDialogue() {
   const el = editor.currentElement();
   if (!el) return;
+
+  // Turning an existing pair off is always allowed as a recovery path. When
+  // creating a pair, refuse any speech that carries alternates because dual
+  // rows do not expose the alternate-choice controls.
+  if (!el.dual) {
+    const doc = editor.doc;
+    const idx = indexOfElement(doc, el.id);
+    let currentStart = idx;
+    while (currentStart > 0 && isSpeech(doc.elements[currentStart - 1])) currentStart -= 1;
+    let currentEnd = currentStart;
+    while (
+      currentEnd + 1 < doc.elements.length &&
+      isSpeech(doc.elements[currentEnd + 1]) &&
+      doc.elements[currentEnd + 1].type !== ElementType.CHARACTER
+    ) currentEnd += 1;
+    let previousEnd = currentStart - 1;
+    while (previousEnd >= 0 && !isSpeech(doc.elements[previousEnd])) previousEnd -= 1;
+    let previousStart = previousEnd;
+    while (previousStart > 0 && isSpeech(doc.elements[previousStart - 1])) previousStart -= 1;
+    const involved = [
+      ...doc.elements.slice(Math.max(0, previousStart), previousEnd + 1),
+      ...doc.elements.slice(currentStart, currentEnd + 1),
+    ];
+    if (involved.some(hasAlternateDialogue)) {
+      toast('Remove stored alternate dialogue choices before creating a dual-dialogue pair.');
+      return;
+    }
+  }
 
   editor.commit(() => {
     const doc = editor.doc;
@@ -832,6 +880,10 @@ function storedTheme() {
 let sidebarTimer = null;
 
 function onEditorUpdate(ed, extra) {
+  if (extra?.notice) toast(extra.notice);
+  if (extra?.requestDeleteAlternate) {
+    confirmDeleteAlternate(extra.requestDeleteAlternate);
+  }
   if (extra?.openNotes) {
     notesDialog(ed, extra.openNotes);
     return;
@@ -843,6 +895,16 @@ function onEditorUpdate(ed, extra) {
   refreshStatus();
   clearTimeout(sidebarTimer);
   sidebarTimer = setTimeout(refreshSidebar, 180);
+}
+
+async function confirmDeleteAlternate(elementId) {
+  const choice = await platform.confirm({
+    message: 'Remove this alternate dialogue?',
+    detail: 'The currently selected wording will be discarded and another stored choice will become active.',
+    buttons: ['Remove Alternate', 'Cancel'],
+    defaultId: 1,
+  });
+  if (choice === 0) editor.deleteActiveAlternateDialogue(elementId);
 }
 
 function refreshStatus() {

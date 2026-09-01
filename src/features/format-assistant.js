@@ -9,6 +9,7 @@
 import { ElementType, ELEMENT_LABEL } from '../core/format.js';
 import { getScenes } from '../core/model.js';
 import { unsupportedPdfCharacters } from '../core/pdf-encoding.js';
+import { hasAlternateDialogue } from '../core/alternates.js';
 
 const SPEECH = new Set([
   ElementType.CHARACTER,
@@ -53,6 +54,7 @@ export function auditDocument(doc, pagination = null) {
   auditDialogueStructure(elements, add);
   auditSceneNumbers(doc, elements, add);
   auditDualDialogue(elements, add);
+  auditAlternates(elements, add);
   auditPdfSupport(doc, elements, pagination, add);
 
   // Stable document order first, severity/rule only as deterministic ties.
@@ -209,6 +211,43 @@ function auditDualDialogue(elements, add) {
     if (!valid) {
       add('malformed-dual-dialogue', 'error', 'Dual dialogue pair is incomplete or malformed.', elements[start]);
     }
+  }
+}
+
+function auditAlternates(elements, add) {
+  for (const element of elements) {
+    if (!element.alternateDialogue) continue;
+    if (!hasAlternateDialogue(element)) {
+      add(
+        'malformed-alternate-dialogue',
+        'error',
+        'Alternate dialogue metadata is incomplete or attached to a non-dialogue element.',
+        element
+      );
+      continue;
+    }
+    if (element.dual) {
+      add(
+        'alternate-in-dual-dialogue',
+        'error',
+        'Alternate dialogue is not supported inside a dual-dialogue pair.',
+        element
+      );
+    }
+    if (!String(element.text || '').trim()) {
+      add('empty-alternate-dialogue', 'warning', 'The active alternate dialogue is empty.', element);
+    }
+    element.alternateDialogue.choices.forEach((choice, index) => {
+      if (!String(choice.text || '').trim()) {
+        add(
+          'empty-alternate-dialogue',
+          'warning',
+          `Stored alternate dialogue ${index + 1} is empty.`,
+          element,
+          { field: `alternateDialogue.${choice.id}` }
+        );
+      }
+    });
   }
 }
 

@@ -39,6 +39,7 @@ export function createElement(type = ElementType.ACTION, text = '', extra = {}) 
     dual: null, // null | 'left' | 'right'
     notes: [], // {id, text, color, author, created}
     tags: [], // {category, value} — production tagging
+    alternateDialogue: null,
     omitted: false,
     ...extra,
   };
@@ -537,6 +538,19 @@ export function cloneDocument(doc) {
       styles: e.styles.map((s) => ({ ...s })),
       notes: e.notes.map((n) => ({ ...n })),
       tags: e.tags.map((t) => ({ ...t })),
+      alternateDialogue: e.alternateDialogue && Array.isArray(e.alternateDialogue.choices)
+        ? {
+            ...e.alternateDialogue,
+            choices: e.alternateDialogue.choices
+              .filter((choice) => choice && typeof choice === 'object')
+              .map((choice) => ({
+                ...choice,
+                styles: Array.isArray(choice.styles)
+                  ? choice.styles.map((style) => ({ ...style }))
+                  : [],
+              })),
+          }
+        : null,
     })),
     styleOverrides: JSON.parse(JSON.stringify(doc.styleOverrides || {})),
     pageOverrides: { ...doc.pageOverrides },

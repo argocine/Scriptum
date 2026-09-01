@@ -14,6 +14,7 @@
  */
 
 import { ElementType, SCREEN_DPI, SCREEN_CHAR_PX, SCREEN_LINE_PX } from '../core/format.js';
+import { alternateStatus, hasAlternateDialogue } from '../core/alternates.js';
 
 const VIRTUAL_WINDOW = 4; // pages rendered on each side of the viewport
 const VIRTUAL_MIN = 12; // scripts shorter than this are never virtualized
@@ -120,7 +121,7 @@ export function pageSignature(page) {
     // sentinels so ordinary typing does not perturb the signature.
     const s = it.charStart === 0 ? 'S' : it.charStart;
     const e = it.last.isLast ? 'E' : it.charEnd;
-    return `${it.elementId}:${s}:${e}`;
+    return `${it.elementId}:${s}:${e}:${it.first.alternateKey || ''}`;
   });
   return `${page.number}|${bits.join('|')}`;
 }
@@ -300,10 +301,46 @@ export function buildPage(page, pageIndex, doc, styles, ctx) {
       div.appendChild(flag);
     }
 
+    if (it.type === ElementType.DIALOGUE && it.first.isFirst && hasAlternateDialogue(model)) {
+      div.appendChild(alternateControls(model));
+    }
+
     body.appendChild(div);
   }
 
   return el;
+}
+
+function alternateControls(model) {
+  const status = alternateStatus(model);
+  const host = document.createElement('span');
+  host.className = 'alt-controls';
+  host.contentEditable = 'false';
+  host.setAttribute('role', 'group');
+  host.setAttribute('aria-label', 'Alternate dialogue choices');
+
+  const button = (action, label, text) => {
+    const control = document.createElement('button');
+    control.type = 'button';
+    control.className = 'alt-button';
+    control.dataset.altAction = action;
+    control.dataset.elementId = model.id;
+    control.setAttribute('aria-label', label);
+    control.title = label;
+    control.textContent = text;
+    return control;
+  };
+
+  host.appendChild(button('previous', 'Previous alternate dialogue', '‹'));
+  const count = document.createElement('span');
+  count.className = 'alt-count';
+  count.textContent = `${status.position}/${status.count}`;
+  count.setAttribute('aria-label', `Alternate ${status.position} of ${status.count}`);
+  host.appendChild(count);
+  host.appendChild(button('next', 'Next alternate dialogue', '›'));
+  host.appendChild(button('add', 'Add alternate dialogue', '+'));
+  host.appendChild(button('remove', 'Remove current alternate dialogue', '−'));
+  return host;
 }
 
 function gutter(cls, text, leftPx) {

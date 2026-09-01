@@ -8,6 +8,7 @@
 
 import { ElementType, ELEMENT_ORDER, applyCase } from '../core/format.js';
 import { createDocument, createElement, normalizeStyles } from '../core/model.js';
+import { normalizeAlternateDialogue } from '../core/alternates.js';
 
 const FORMAT = 'scriptum-screenplay';
 const FORMAT_VERSION = 1;
@@ -142,6 +143,8 @@ export function parseProject(json) {
       element.revisionId = typeof e.revisionId === 'string' ? e.revisionId : null;
       element.dual = e.dual === 'left' || e.dual === 'right' ? e.dual : null;
       element.omitted = booleanOr(e.omitted, false);
+      element.alternateDialogue =
+        type === ElementType.DIALOGUE ? normalizeAlternateDialogue(e.alternateDialogue) : null;
       if (typeof element.id !== 'string' || !element.id || seenIds.has(element.id)) {
         element.id = fresh.id;
       }

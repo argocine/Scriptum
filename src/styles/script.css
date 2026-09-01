@@ -248,6 +248,45 @@
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
 }
 
+.alt-controls {
+  position: absolute;
+  top: 0;
+  right: -92px;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--line-h);
+  font: 600 10px/1 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.alt-button {
+  width: 17px;
+  height: 17px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.alt-button:hover,
+.alt-button:focus-visible {
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+}
+
+.alt-count {
+  min-width: 24px;
+  color: var(--muted);
+  text-align: center;
+}
+
 /* Highlight for find results and the current scene. */
 .hl-find {
   background: #ffe27a;
@@ -341,6 +380,7 @@
   }
   .page-tab,
   .note-flag,
+  .alt-controls,
   .el.scene-active::before {
     display: none !important;
   }

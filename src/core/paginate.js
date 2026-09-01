@@ -168,6 +168,9 @@ function layoutElement(el, styles, opts = {}) {
     revisionId: el.revisionId || null,
     omitted: !!el.omitted,
     hasNotes: (el.notes && el.notes.length > 0) || false,
+    alternateKey: el.alternateDialogue
+      ? `${el.alternateDialogue.activeId}:${el.alternateDialogue.choices?.length || 0}`
+      : '',
   }));
 }
 
