@@ -17,8 +17,11 @@ import { ElementType, SCREEN_DPI, SCREEN_CHAR_PX, SCREEN_LINE_PX } from '../core
 import { alternateStatus, hasAlternateDialogue } from '../core/alternates.js';
 import { productionLookup } from '../core/production.js';
 
-const VIRTUAL_WINDOW = 4; // pages rendered on each side of the viewport
-const VIRTUAL_MIN = 12; // scripts shorter than this are never virtualized
+const VIRTUAL_WINDOW = 4;
+// Keep the complete screenplay in the semantic DOM. Modern feature-length
+// drafts remain practical, and screen readers can browse every page instead
+// of encountering empty virtualization shells.
+const VIRTUAL_MIN = Number.POSITIVE_INFINITY;
 
 /* ------------------------------------------------------------------ *
  * Grouping lines back into editable parts
@@ -341,12 +344,14 @@ export function buildPage(page, pageIndex, doc, styles, ctx) {
 
     // Note flag
     if (model.notes?.length) {
-      const flag = document.createElement('span');
+      const flag = document.createElement('button');
+      flag.type = 'button';
       flag.className = 'note-flag';
       flag.contentEditable = 'false';
       flag.dataset.noteFor = model.id;
       flag.style.setProperty('--note-color', model.notes[0].color || '#f2c94c');
       flag.title = model.notes.map((n) => n.text).join('\n\n');
+      flag.setAttribute('aria-label', `Open ${model.notes.length} note${model.notes.length === 1 ? '' : 's'}`);
       div.appendChild(flag);
     }
 

@@ -14,7 +14,20 @@ import { normalizeRevisionRoom } from '../features/snapshots.js';
 import { normalizeStoryMap } from '../features/story.js';
 
 const FORMAT = 'scriptum-screenplay';
-const FORMAT_VERSION = 1;
+const FORMAT_VERSION = 2;
+
+export const MAX_PROJECT_FILE_BYTES = 96 * 1024 * 1024;
+export const MAX_DOCUMENT_ELEMENTS = 25000;
+const MAX_DOCUMENT_TEXT_UNITS = 16 * 1024 * 1024;
+const MAX_PROJECT_STRING_UNITS = 80 * 1024 * 1024;
+const MAX_PROJECT_NODES = 1_000_000;
+const MAX_PROJECT_DEPTH = 80;
+const MAX_RANGES = 500_000;
+const MAX_NOTES = 100_000;
+const MAX_ALTERNATES_PER_ELEMENT = 50;
+const MAX_REVISION_SETS = 100;
+const MAX_PRODUCTION_CATEGORIES = 500;
+const MAX_PRODUCTION_ITEMS = 50_000;
 
 export function serializeProject(doc) {
   return `${JSON.stringify(
@@ -65,6 +78,7 @@ export function parseProject(json) {
   // versions gain any fields added since, with sane defaults.
   const base = createDocument({ elements: [] });
   const d = isRecord(parsed.document) ? parsed.document : {};
+  assertDocumentBudget(d);
   const title = isRecord(d.title) ? d.title : {};
   const sceneNumbering = isRecord(d.sceneNumbering) ? d.sceneNumbering : {};
   const revisions = isRecord(d.revisions) ? d.revisions : {};
@@ -182,6 +196,97 @@ export function parseProject(json) {
     )
   );
   return doc;
+}
+
+/** Refuse hostile or accidentally enormous models before hydration/rendering. */
+export function assertDocumentBudget(document) {
+  const d = isRecord(document) ? document : {};
+  validateTreeBudget(d);
+
+  const elements = Array.isArray(d.elements) ? d.elements : [];
+  if (elements.length > MAX_DOCUMENT_ELEMENTS) {
+    throw new Error(`This screenplay contains more than ${MAX_DOCUMENT_ELEMENTS.toLocaleString()} elements.`);
+  }
+  if ((Array.isArray(d.revisions?.sets) ? d.revisions.sets.length : 0) > MAX_REVISION_SETS) {
+    throw new Error('This screenplay contains more revision sets than Scriptum can safely open.');
+  }
+  if ((Array.isArray(d.pageLock?.anchors) ? d.pageLock.anchors.length : 0) > MAX_DOCUMENT_ELEMENTS) {
+    throw new Error('This screenplay contains more page-lock anchors than Scriptum can safely open.');
+  }
+  if ((Array.isArray(d.production?.categories) ? d.production.categories.length : 0) > MAX_PRODUCTION_CATEGORIES) {
+    throw new Error('This screenplay contains more production categories than Scriptum can safely open.');
+  }
+  if ((Array.isArray(d.production?.items) ? d.production.items.length : 0) > MAX_PRODUCTION_ITEMS) {
+    throw new Error('This screenplay contains more production items than Scriptum can safely open.');
+  }
+
+  let textUnits = 0;
+  let ranges = 0;
+  let notes = 0;
+  for (const value of Object.values(isRecord(d.title) ? d.title : {})) {
+    if (typeof value === 'string') textUnits += value.length;
+  }
+  for (const element of elements) {
+    if (!isRecord(element)) continue;
+    if (typeof element.text === 'string') textUnits += element.text.length;
+    ranges += Array.isArray(element.styles) ? element.styles.length : 0;
+    ranges += Array.isArray(element.tags) ? element.tags.length : 0;
+    const elementNotes = Array.isArray(element.notes) ? element.notes : [];
+    notes += elementNotes.length;
+    for (const note of elementNotes) {
+      if (typeof note?.text === 'string') textUnits += note.text.length;
+    }
+    const choices = Array.isArray(element.alternateDialogue?.choices)
+      ? element.alternateDialogue.choices
+      : [];
+    if (choices.length >= MAX_ALTERNATES_PER_ELEMENT) {
+      throw new Error(`A dialogue element contains more than ${MAX_ALTERNATES_PER_ELEMENT} alternate choices.`);
+    }
+    for (const choice of choices) {
+      if (typeof choice?.text === 'string') textUnits += choice.text.length;
+      ranges += Array.isArray(choice?.styles) ? choice.styles.length : 0;
+    }
+  }
+  if (textUnits > MAX_DOCUMENT_TEXT_UNITS) {
+    throw new Error('This screenplay contains more live document text than Scriptum can safely open.');
+  }
+  if (ranges > MAX_RANGES) {
+    throw new Error('This screenplay contains more formatting and tag ranges than Scriptum can safely open.');
+  }
+  if (notes > MAX_NOTES) {
+    throw new Error('This screenplay contains more notes than Scriptum can safely open.');
+  }
+  return true;
+}
+
+function validateTreeBudget(root) {
+  const stack = [{ value: root, depth: 0 }];
+  const seen = new WeakSet();
+  let nodes = 0;
+  let stringUnits = 0;
+  while (stack.length) {
+    const { value, depth } = stack.pop();
+    nodes += 1;
+    if (nodes > MAX_PROJECT_NODES) {
+      throw new Error('This screenplay contains more data entries than Scriptum can safely open.');
+    }
+    if (depth > MAX_PROJECT_DEPTH) {
+      throw new Error('This screenplay is nested more deeply than Scriptum can safely open.');
+    }
+    if (typeof value === 'string') {
+      stringUnits += value.length;
+      if (stringUnits > MAX_PROJECT_STRING_UNITS) {
+        throw new Error('This screenplay contains more text data than Scriptum can safely open.');
+      }
+      continue;
+    }
+    if (!value || typeof value !== 'object') continue;
+    if (seen.has(value)) throw new Error('This screenplay contains a circular data structure.');
+    seen.add(value);
+    for (const child of Array.isArray(value) ? value : Object.values(value)) {
+      stack.push({ value: child, depth: depth + 1 });
+    }
+  }
 }
 
 function isRecord(value) {

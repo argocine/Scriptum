@@ -8,6 +8,7 @@ import { ElementType } from './format.js';
 import { newId, normalizeStyles } from './model.js';
 
 export const ALTERNATE_SCHEMA_VERSION = 1;
+export const MAX_ALTERNATE_CHOICES = 50;
 
 function choiceFromActive(element, id, order) {
   return {
@@ -73,6 +74,7 @@ export function alternateStatus(element) {
 
 export function addAlternate(element) {
   if (element?.type !== ElementType.DIALOGUE || element.tags?.length) return false;
+  if (hasAlternateDialogue(element) && alternateCount(element) >= MAX_ALTERNATE_CHOICES) return false;
   if (!hasAlternateDialogue(element)) {
     const originalId = newId('alt');
     const activeId = newId('alt');
@@ -136,6 +138,9 @@ export function deleteActiveAlternate(element) {
 
 export function normalizeAlternateDialogue(value) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.choices)) return null;
+  if (value.choices.length >= MAX_ALTERNATE_CHOICES) {
+    throw new Error(`A dialogue element contains more than ${MAX_ALTERNATE_CHOICES} alternate choices.`);
+  }
   if (
     Number.isInteger(value.schemaVersion) &&
     value.schemaVersion > ALTERNATE_SCHEMA_VERSION

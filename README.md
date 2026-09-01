@@ -5,201 +5,202 @@
 Scriptum is a free, open-source screenwriting application that takes care of
 the page while you take care of the story.
 
-Industry-standard formatting. Familiar keyboard controls. Professional PDF
-export. No subscription, no account, and no one looking over your shoulder.
-
-Your screenplay belongs to you. It stays on your device and is saved in an
-open, readable format—not trapped behind a service that may disappear
-tomorrow.
+No subscription. No account. No advertising. No one looking over your
+shoulder. Your screenplay stays on your device in an open, readable format.
 
 [Write in your browser](https://argocine.github.io/Scriptum/) ·
-[Download Scriptum](../../releases)
+[Download the desktop app](https://github.com/argocine/Scriptum/releases/latest) ·
+[Suggest a feature](https://github.com/argocine/Scriptum/issues)
 
 ---
 
-## Made for writing
+## Made for the way writers work
 
 The best formatting is the kind you stop noticing.
 
-Press **Enter** and Scriptum moves naturally from a scene heading to action,
-from a character cue to dialogue, and from dialogue back to action. Press
-**Tab** to change the element type. Begin with `INT.` or `EXT.` and the page
-understands what comes next.
+Press **Enter** and Scriptum moves naturally from scene heading to action, from
+character to dialogue, and back again. Press **Tab** to change the element.
+Begin with `INT.` or `EXT.` and the page understands what comes next.
 
-Autocomplete remembers your characters, locations, times of day, transitions,
-and extensions such as `(V.O.)` and `(CONT'D)`.
+Autocomplete remembers characters, locations, times of day, transitions, and
+extensions such as `(V.O.)` and `(CONT'D)`. The Format Assistant catches
+structural mistakes without offering opinions about spelling, style, or taste.
 
-You keep writing. Scriptum keeps the page in order.
+The complete writing flow includes:
 
-The complete keyboard flow:
+- Industry-standard Scene Heading, Action, Character, Parenthetical, Dialogue,
+  Transition, Shot, General, and Act Break elements
+- **Enter**, **Tab**, and **Ctrl/⌘ + 1–9** keyboard formatting
+- Character, location, time-of-day, transition, and extension autocomplete
+- Bold, italic, underline, dual dialogue, notes, and omitted scenes
+- Find and replace, scene navigation, word count, runtime, and page count
+- US Letter and A4 pages with adjustable element and page geometry
 
-- **Enter** moves to the element that naturally follows—Character after
-  Dialogue, Action after a Scene Heading, Dialogue after a cue.
-- **Tab** cycles the element type; on a finished character cue it opens a
-  parenthetical instead.
-- Typing `INT. ` or `EXT. ` promotes the line to a Scene Heading automatically.
-- **⌘1–⌘9** set the element type outright.
-- Autocomplete offers characters, locations, times of day, standard
-  transitions, and extensions such as `(V.O.)` and `(CONT'D)`.
-- Backspace at the start of an element merges it upward.
+## Keep every good idea
 
-## A screenplay on screen. The same screenplay on paper.
+A rewrite should not require an archaeological expedition through old files.
 
-Scriptum formats in Courier 12pt at exactly 10 characters and 6 lines per
-inch, using US Letter or A4 pages. Nine element types—Scene Heading, Action,
-Character, Parenthetical, Dialogue, Transition, Shot, General, and Act
-Break—each use their standard margins:
+- **Alternate Dialogue** keeps several versions of a line inside one dialogue
+  element and prints only the version currently selected.
+- **Revision Room** creates named, immutable snapshots, compares drafts, and
+  restores an earlier state only after making a safety snapshot of the present.
+- **Revision Sets** provide the standard colour sequence, headers, marks, locked
+  pages, A-pages, and locked scene numbers with lettered insertions.
 
-| Element | Left | Width |
-|---|---|---|
-| Scene Heading | 1.5" | 60 characters |
-| Action | 1.5" | 60 characters |
-| Character | 3.7" | 38 characters |
-| Parenthetical | 3.1" | 30 characters |
-| Dialogue | 2.5" | 40 characters |
-| Transition | flush right to 7.5" | — |
+## See the story before it sees an audience
 
-Pages contain 55 lines. Every margin is adjustable in **Format → Element
-Settings** when a production needs something different.
+The Index Card board and **Story Timeline** put structure beside the pages,
+where it belongs. Organize acts and sequences, create colour-coded story lanes,
+place beats against scenes, and find work that has not yet found its place.
 
-Pagination follows screenplay practice:
-
-- Scene headings stay with the action that follows.
-- Character cues stay with their dialogue.
-- Parentheticals stay with the speech they modify.
-- Split dialogue receives `(MORE)` and `(CONT'D)` automatically.
-- Action and dialogue keep at least two lines on either side of a page break.
-
-Pagination is computed by counting characters rather than measuring rendered
-text. The page count in the editor is the page count in the exported PDF.
+Cards, beats, lanes, snapshots, and dialogue alternatives stay attached to
+stable screenplay identifiers when scenes move. They are saved in the native
+`.scriptum` document—not in a separate account or service.
 
 ## Ready when production is
 
-Scriptum includes the tools a draft needs when it leaves the writer's desk:
+Scriptum follows the draft beyond the writer's desk:
 
-- Lockable scene numbers with lettered insertions
-- Revision sets in the standard colour order, with revision marks and headers
-- Locked pages and A-pages
-- Omitted scenes
-- Dual dialogue
-- Notes attached to individual elements
-- Scene, character, location, and statistical reports
-- CSV report export
+- Tag selected text with production categories and reusable breakdown items
+- Browse the live breakdown by scene and export clean CSV reports
+- Generate scene, character, location, statistics, and revision-change reports
+- Lock scene and page numbering without renumbering material already distributed
+- Print revision marks, revision headers, scene numbers, dual dialogue, and a
+  professional title page
 
-Scene reports include lengths in eighths of a page and cast by scene. Character
-reports include speeches, words, scenes, and first and last appearances.
-Location reports and overall statistics include interior/exterior and day/night
-splits.
+Production tags and private notes help you work; they are not printed into the
+screenplay PDF.
+
+## A quieter room to finish the work
+
+**Focus Mode** removes the surrounding interface while keeping the screenplay
+and an optional writing sprint in view. Sprints track elapsed time and net new
+words in memory only; they are not written into the project file.
+
+**Table Read** reads action and dialogue aloud with voices the operating system
+or browser explicitly marks as on-device. Scriptum refuses remote or unknown
+voices. It never turns on the microphone and never records audio.
+
+## The page you see is the page you send
+
+Pagination is calculated in screenplay lines and monospaced character cells:
+
+- 12-point type at 10 Latin character cells and 6 lines per inch
+- 55 body lines on the default page
+- Scene headings stay with the following action
+- Character cues and parentheticals stay with their dialogue
+- Split dialogue receives `(MORE)` and `(CONT'D)` automatically
+- Action and dialogue keep at least two lines on either side of a page break
+
+PDF export is rendered locally by Chromium from the same pagination model.
+It embeds the local fonts it uses, produces searchable tagged text, and supports
+Unicode shaping for accents, non-Latin scripts, combining text, and emoji.
+Exact glyph coverage depends on the fonts installed on the computer; Scriptum
+does not download a font or send text to a font service.
 
 ## Your script is not our business
 
 Scriptum has no accounts, analytics, advertising, telemetry, cloud sync, or
-crash reporting.
+crash-reporting service.
 
-The desktop application blocks HTTP and HTTPS requests from its renderer. Your
-screenplay and recovery snapshot remain on your device. Recovery can be cleared
-or disabled from the **Privacy** panel.
+The desktop renderer is sandboxed, has no Node.js access, denies system
+permissions, and blocks HTTP and HTTPS traffic. Files can be read or written
+only after you choose them in a system dialog. The sole help link opens the
+exact Fountain syntax page in your normal browser without adding screenplay
+text or query parameters.
 
-The browser edition keeps recovery data only in the current browser tab.
-Because it is delivered through GitHub Pages, GitHub receives the ordinary
-connection information required to serve a website. Scriptum does not receive
-your screenplay.
+Unsaved desktop work has one local recovery copy. It is removed after a clean
+save, discard, or quit and can be erased or disabled from **Privacy**. The
+browser edition keeps recovery in the current tab rather than persistent site
+storage. Theme preference is the only non-screenplay browser preference kept
+between sessions.
+
+The hosted edition is delivered by GitHub Pages, so GitHub receives the normal
+connection information needed to serve a website. Scriptum's application code
+does not receive or transmit the screenplay.
 
 Read the complete [privacy policy](PRIVACY.md) and
 [security policy](SECURITY.md).
 
-## Your files remain useful—with or without Scriptum
+## Files that remain yours
 
-| Format | Import | Export |
-|---|---:|---:|
-| Scriptum (`.scriptum`) | ✅ | ✅ |
-| Final Draft (`.fdx`) | ✅ | ✅ |
-| Fountain (`.fountain`) | ✅ | ✅ |
-| PDF | — | ✅ |
-| Plain text | ✅ | ✅ |
+| Format | Import | Export | What it carries |
+|---|:---:|:---:|---|
+| Scriptum (`.scriptum`) | Yes | Yes | Full-fidelity document, including Scriptum-only planning and production data |
+| Final Draft (`.fdx`) | Yes | Yes | Screenplay text and supported formatting/interchange metadata |
+| Fountain (`.fountain`, `.spmd`) | Yes | Yes | Screenplay text, inline emphasis, notes, scene numbers, and dual-dialogue syntax |
+| Plain text (`.txt`) | Yes | Yes | Readable screenplay text without rich project metadata |
+| PDF | No | Yes | Visible screenplay and title page as searchable, tagged output |
 
-Bold, italic, and underline survive every supported round trip. Dual dialogue,
-scene numbers, revision sets, and the title page survive FDX round trips.
+Final Draft and Fountain do not carry Alternate Dialogue choices, production
+tags, Revision Room history, or Story Timeline data. Scriptum warns before such
+an export. Save as `.scriptum` first to preserve the complete project.
 
-The native `.scriptum` format is plain JSON. It can be inspected with an
-ordinary text editor and does not depend on a proprietary service.
-
-The PDF writer has no dependencies and embeds no fonts. It uses Courier,
-Courier-Bold, Courier-Oblique, and Courier-BoldOblique, which every PDF reader
-is required to provide and whose metrics are exactly the 10 characters per
-inch the format assumes. Output is small and carries no font licensing.
+The native format is unobfuscated JSON. It can be inspected with an ordinary
+text editor and does not depend on Scriptum continuing to exist.
+Scriptum 1.1 writes native format version 2; those files require Scriptum 1.1
+or newer, while Scriptum 1.1 continues to open version 1 projects.
 
 ---
 
 ## Installing Scriptum
 
-Download the appropriate installer from the [Releases page](../../releases).
+Download the file for your machine from the
+[Releases page](https://github.com/argocine/Scriptum/releases/latest).
 
-| Machine | File |
+| Machine | Download |
 |---|---|
-| Mac, Apple Silicon (M1 and later) | `Scriptum-*-arm64.dmg` |
+| Mac, Apple Silicon (M1 or later) | `Scriptum-*-arm64.dmg` |
 | Mac, Intel | `Scriptum-*-x64.dmg` |
-| Windows | `Scriptum-Setup-*.exe` |
-| Linux | `Scriptum-*.AppImage` |
+| Windows, 64-bit Intel/AMD | `Scriptum-Setup-*-x64.exe` |
+| Linux, 64-bit Intel/AMD | `Scriptum-*-x64.AppImage` or `Scriptum-*-x64.deb` |
 
-### First launch
+The macOS desktop build requires macOS 13 or later. The Apple Silicon download
+contains a native `arm64` application; it is not an Intel build running through
+Rosetta.
 
-The current builds do not carry a publicly trusted publisher signature. macOS
-and Windows will therefore display a warning the first time Scriptum opens.
-This indicates that the publisher identity has not been certified; it does not
-indicate that the application contains malware.
+### First launch and publisher warnings
 
-**macOS:** Open **System Settings → Privacy & Security**, scroll down, and
-select **Open Anyway** beside the Scriptum message. This is required only once.
+Current macOS builds are ad-hoc signed but not Apple-notarized. Windows builds
+do not have a publicly trusted publisher certificate. The operating system
+therefore displays a first-launch warning.
 
-Alternatively:
+- **macOS:** Move Scriptum to Applications, try to open it once, then use
+  **System Settings → Privacy & Security → Open Anyway** and confirm.
+- **Windows:** In Microsoft Defender SmartScreen, choose **More info**, verify
+  that the file came from this repository, then choose **Run anyway**.
+- **Linux:** Mark the AppImage executable with
+  `chmod +x Scriptum-*-x64.AppImage`, then run it. For Debian or Ubuntu, use
+  `sudo apt install ./Scriptum-*-x64.deb`.
 
-```bash
-xattr -dr com.apple.quarantine /Applications/Scriptum.app
-```
+Every release includes `SHA256SUMS.txt`. Compare a download before opening it
+when chain-of-custody matters. Releases also have signed GitHub build-provenance
+attestations; verify one with
+`gh attestation verify FILE --repo argocine/Scriptum`. Building from the tagged
+source remains the most independently inspectable option.
 
-On macOS 15 and later, Control-clicking the app and choosing Open no longer
-works for this. Use System Settings or the command above.
+On macOS or Linux, place the download beside `SHA256SUMS.txt` and run
+`shasum -a 256 -c SHA256SUMS.txt`. On Windows, run
+`Get-FileHash .\Scriptum-Setup-*-x64.exe -Algorithm SHA256` in PowerShell and
+compare the result with the matching checksum entry.
 
-**Windows:** In the SmartScreen message, select **More info**, followed by
-**Run anyway**.
+## What Scriptum does not do
 
-**Linux:**
+Scriptum does not provide real-time collaboration, cloud sync, an online
+screenplay account, speech-to-script dictation, or scheduling/budgeting-system
+integration. FDX, Fountain, CSV, and plain text are the interchange paths.
 
-```bash
-chmod +x Scriptum-*.AppImage
-./Scriptum-*.AppImage
-```
-
-## What Scriptum does not pretend to be
-
-Scriptum does not currently provide:
-
-- Real-time collaboration or cloud sync
-- Alternate dialogue storage
-- A complete Story Map or Beat Board system (an index-card board and scene
-  navigator are included, but not a structural timeline)
-- Draft comparison
-- Speech-to-script dictation or table reads
-- Production tagging for scheduling software
-- Non-Latin characters in PDF exports
-
-The editor and `.scriptum`, `.fdx`, `.fountain`, and plain-text files support
-full Unicode. PDF export currently uses the standard Courier faces and
-supports Western European text, including accents, curly quotes, dashes, and
-ellipses. Unsupported characters are replaced with `?` in the PDF only.
-
-No vague promises. No feature list written by the advertising department.
-Just the application as it exists today.
+Those limits are deliberate facts, not fine print.
 
 ## Built in the open
 
-Scriptum is open source, licensed under MIT, and developed in public. We're
-continually working on new features, refinements, and fixes.
+Scriptum is MIT-licensed free software, developed in public, and continually
+improved with new features, refinements, and fixes.
 
-If something would make Scriptum better for the way you write, tell us.
-[Open an issue](../../issues) with a suggestion or a bug report. Thoughtful
-pull requests are welcome too.
+If something would make Scriptum better for the way you write,
+[open an issue](https://github.com/argocine/Scriptum/issues). Suggestions, bug
+reports, accessibility feedback, translations, and thoughtful pull requests
+are welcome.
 
 Good software gets better when the people using it have a say.
 
@@ -207,124 +208,80 @@ Good software gets better when the people using it have a say.
 
 ## For developers
 
-### Running it
+### Run and test
+
+Development requires Node.js 22.12.0 or newer.
 
 ```bash
-npm install
+npm ci
 npm start
+npm test
+npm run test:app
 ```
 
-To run Scriptum without Electron, use any Chromium browser:
+`npm test` runs the deterministic model, parser, pagination, privacy, security,
+feature, and PDF-model suites. `npm run test:app` launches real Electron
+instances to verify quit safety and produce an actual Unicode PDF; when Poppler
+tools are available it also checks extracted text, page count, and embedded
+fonts.
+
+Run the browser edition locally with:
 
 ```bash
 python3 tools/serve.py
 ```
 
-Then open `http://localhost:8123`. The browser build is fully functional; it
-uses download links instead of native Save dialogs.
+Then open `http://localhost:8123`. Ordinary saves become browser downloads;
+PDF export uses the browser's system print dialog; crash recovery remains in
+the current tab.
 
-### Building it yourself
-
-```bash
-npm run dist          # macOS: native Apple Silicon and Intel builds
-npm run dist:all      # macOS, Windows and Linux
-```
-
-Installers are written to `dist/`.
-
-### Publishing desktop releases
-
-`.github/workflows/release.yml` builds macOS, Windows, and Linux installers and
-attaches them to a GitHub Release. It runs on GitHub's free tier for public
-repositories.
+### Build
 
 ```bash
-npm version minor      # bumps package.json and tags the commit
-git push --follow-tags
+npm run dist          # macOS: separate native arm64 and x64 builds
+npm run dist:all      # macOS, Windows, and Linux targets
 ```
 
-The release is published with every installer attached when the workflow
-finishes.
+Installers are written to `dist/`. The macOS packaging hook removes Electron's
+unused capture-capability descriptions and disables App Transport Security
+network allowances before the app is signed.
 
-### Publishing the browser version
+`dist:all` is a convenience command and cross-building requires the host tools
+documented by electron-builder (including Wine for some Windows targets and
+Linux packaging tools for DEB/AppImage). The pinned GitHub Actions release
+workflow is the supported way to produce the complete public matrix.
 
-`.github/workflows/pages.yml` publishes `src/` to GitHub Pages on every push to
-`main`. Enable it once under **Settings → Pages → Source: GitHub Actions**.
-
-The browser build uses the same formatting engine and PDF exporter as the
-desktop application. It uses the browser's download and file-picker dialogs
-instead of native dialogs, and keeps crash recovery in the current browser tab
-rather than persistently between browser sessions.
-
-### Code signing
-
-The current release uses an ad-hoc signature on macOS and has no publicly
-trusted publisher signature on Windows.
-
-- **macOS:** Join the Apple Developer Program, remove the ad-hoc
-  `"identity": "-"` setting from `package.json`, add the certificate as the
-  `CSC_LINK` and `CSC_KEY_PASSWORD` repository secrets, set
-  `CSC_IDENTITY_AUTO_DISCOVERY` to `true`, and provide notarization credentials.
-- **Windows:** Configure a publicly trusted Authenticode code-signing service
-  or certificate. Scriptum may qualify for the free open-source program
-  provided by SignPath Foundation.
-- **Linux:** No platform code-signing certificate is required.
-
-Code signing is not required for the software to function. It removes the
-first-launch publisher warning and allows users to verify the publisher and
-integrity of the downloaded application.
-
-### Layout
+### Architecture
 
 ```text
-electron/          Main process: window, native menus, file dialogs
-  main.cjs
-  preload.cjs      The only bridge to the filesystem
-src/
-  core/
-    format.js      Page and element geometry—the single source of truth
-    model.js       Document model, element flow, character indexing
-    paginate.js    The formatting engine: wrapping, page breaks, MORE/CONT'D
-    autocomplete.js
-  io/
-    pdf.js         Dependency-free PDF 1.4 writer
-    fdx.js         Final Draft XML
-    fountain.js    Fountain plain text
-    project.js     Native format, plain-text export, autosave
-  features/
-    reports.js  cards.js  find.js
-  ui/
-    editor.js      Editing surface and every mutation path
-    render.js      Paginator output → editable DOM
-    dialogs.js
-  app.js           Shell: wiring, file commands, sidebar, status bar
-test/              Run with `npm test`
-tools/serve.py     Static server for the browser build
+electron/           main process, native menus, file capabilities, preload bridge
+build/              icons, entitlements, and package-hardening hook
+src/core/           document model, Unicode cells, formatting, pagination
+src/features/       cards, timeline, snapshots, tags, reports, sprints, table read
+src/io/             Scriptum, FDX, Fountain, text, and local PDF output
+src/ui/             editor renderer and accessible dialogs
+src/app.js          application shell and command wiring
+test/               deterministic and real-Electron regression suites
 ```
 
-Pagination is computed in character and line units, never by measuring the
-DOM. The editor renders each element at exactly the character width used by the
-paginator. Browser line breaking therefore lands on the same words, keeping
-the editor, PDF, and plain-text export in agreement.
+The Electron renderer uses context isolation, Chromium sandboxing, no Node
+integration, a restrictive CSP, denied permissions, blocked renderer network
+requests, exact-path file grants, ASAR integrity, and restrictive Electron
+fuses. Project files are treated as untrusted input and normalized before use.
 
-### Tests
+### Releases
 
-```bash
-npm test          # 69 checks, no Electron needed, runs in about a second
-npm run test:app  # launches the real app; takes about half a minute
-```
+Pushing a version tag such as `v1.1.0` runs the release workflow on macOS,
+Windows, and Linux, tests every target, builds the installers, generates
+`SHA256SUMS.txt`, signs build-provenance attestations, and creates the GitHub
+Release. The workflow rejects tags that do not exactly match `package.json` or
+whose commit is not on `main`. Pushing to `main` publishes the static browser
+edition through GitHub Pages.
 
-`npm test` covers the native file-access boundary, project-file validation,
-line wrapping, page-break rules, MORE/CONT'D splitting, scene numbering and
-A-scenes, locked pages and A-pages, Fountain parsing and round-tripping,
-reports, and the exact point coordinates and WinAnsi encoding of exported PDF
-text.
+Paid Apple Developer ID/notarization and Windows Authenticode certificates are
+not currently configured. See [SECURITY.md](SECURITY.md) for the resulting
+authenticity limits.
 
-`npm run test:app` drives a real Electron instance over the DevTools protocol
-and verifies that the application can always be quit, with and without unsaved
-changes. This guards against regressions in Electron's cancelled
-`beforeunload` behavior.
-
-## Licence
+## License
 
 [MIT](LICENSE). Use it. Change it. Give it away.

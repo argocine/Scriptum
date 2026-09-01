@@ -8,6 +8,7 @@
 
 import { ElementType, ELEMENT_ORDER, ELEMENT_LABEL } from './core/format.js';
 import { createDocument, createElement, getScenes, getElement, indexOfElement } from './core/model.js';
+import { SaveCoordinator } from './core/save-coordinator.js';
 import { estimateRuntime } from './core/paginate.js';
 import { ScriptEditor, inferElements } from './ui/editor.js';
 import { CardBoard } from './features/cards.js';
@@ -26,6 +27,8 @@ import {
   serializeProject,
   parseProject,
   normalizeDocument,
+  assertDocumentBudget,
+  MAX_PROJECT_FILE_BYTES,
   toPlainText,
   writeAutosave,
   readAutosave,
@@ -50,6 +53,7 @@ import {
   lockScenesAction,
   shortcutsDialog,
   openDialog,
+  closeDialog,
   h,
 } from './ui/dialogs.js';
 
@@ -58,20 +62,29 @@ import {
  * ------------------------------------------------------------------ */
 
 const native = window.scriptum || null;
+document.documentElement.dataset.runtime = native ? 'native' : 'web';
+document.documentElement.dataset.platform = native?.platform || 'web';
 
 const platform = {
   isNative: !!native,
 
   async open(kinds) {
     if (native) return native.openDialog(kinds);
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = '.scriptum,.fdx,.fountain,.txt,.spmd';
       input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return resolve(null);
-        resolve({ path: file.name, data: await file.text() });
+        try {
+          const file = input.files?.[0];
+          if (!file) return resolve(null);
+          if (file.size > MAX_PROJECT_FILE_BYTES) {
+            throw new Error('That file is too large for Scriptum to open safely (96 MiB maximum).');
+          }
+          resolve({ path: file.name, data: await file.text() });
+        } catch (error) {
+          reject(error);
+        }
       };
       input.click();
     });
@@ -107,7 +120,7 @@ const platform = {
 
   async confirm(opts) {
     if (native) return native.confirm(opts);
-    return window.confirm(`${opts.message}\n\n${opts.detail || ''}`) ? 0 : opts.buttons.length - 1;
+    return browserConfirm(opts);
   },
 
   async error({ message, detail }) {
@@ -126,6 +139,27 @@ const platform = {
     native?.onMenu(channel, handler);
   },
 };
+
+function browserConfirm({ message, detail = '', buttons = ['OK'], defaultId = 0 }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (index) => {
+      if (settled) return;
+      settled = true;
+      resolve(index);
+    };
+    openDialog({
+      title: message,
+      body: h('p', {}, detail),
+      buttons: buttons.map((label, index) => ({
+        label,
+        primary: index === defaultId,
+        onClick: () => finish(index),
+      })),
+      onClose: () => finish(buttons.length - 1),
+    });
+  });
+}
 
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
@@ -168,6 +202,7 @@ const dom = {
   focusProgress: document.getElementById('focus-progress'),
   focusProgressFill: document.getElementById('focus-progress-fill'),
   focusAnnouncer: document.getElementById('focus-announcer'),
+  recoveryWarning: document.getElementById('recovery-warning'),
 };
 
 const state = {
@@ -181,7 +216,11 @@ const state = {
   focusMode: false,
   sprintStatus: 'idle',
   recoveryEnabled: true,
+  recoveryUnavailable: false,
 };
+
+const saveCoordinator = new SaveCoordinator();
+let recoveryQueue = Promise.resolve();
 
 const editor = new ScriptEditor({
   container: dom.pages,
@@ -208,8 +247,9 @@ let sprintTimer = null;
  * Boot
  * ------------------------------------------------------------------ */
 
-function boot() {
+async function boot() {
   applyTheme(state.theme);
+  dom.pages.spellcheck = native?.platform === 'darwin';
   buildElementSelect();
   wireToolbar();
   wireFocusControls();
@@ -219,23 +259,26 @@ function boot() {
   wireMenus();
   wireZoom();
 
-  const recovered = readAutosave();
+  const recovered = await readRecoveryData();
   if (recovered?.document && recovered.at > Date.now() - 1000 * 60 * 60 * 24 * 14) {
-    offerRecovery(recovered);
+    await offerRecovery(recovered);
   } else {
-    if (recovered) clearAutosave();
+    if (recovered) await clearRecoveryData();
     editor.load(sampleDocument());
     markClean();
   }
 
   setInterval(() => {
-    if (state.dirty && state.recoveryEnabled) writeAutosave(editor.doc, state.filePath);
+    if (state.dirty && state.recoveryEnabled) void writeRecoveryData();
   }, 20000);
   updateSprintHud();
 
   window.addEventListener('beforeunload', (e) => {
     if (!state.dirty) return;
-    if (state.recoveryEnabled) writeAutosave(editor.doc, state.filePath);
+    if (state.recoveryEnabled) {
+      if (native) void writeRecoveryData();
+      else if (!writeAutosave(editor.doc, state.filePath)) showRecoveryWarning();
+    }
 
     // Only the browser build may veto here. Electron treats a cancelled
     // beforeunload as a silent, absolute refusal to close — there is no
@@ -247,6 +290,73 @@ function boot() {
     e.preventDefault();
     e.returnValue = '';
   });
+}
+
+async function readRecoveryData() {
+  if (!native) return readAutosave();
+  try {
+    const raw = await native.readRecovery();
+    return raw ? JSON.parse(raw) : readAutosave();
+  } catch (error) {
+    showRecoveryWarning();
+    console.error('Could not read local recovery data:', error);
+    return readAutosave();
+  }
+}
+
+function writeRecoveryData() {
+  if (!state.recoveryEnabled) return Promise.resolve(false);
+  let payload;
+  try {
+    payload = JSON.stringify({
+      at: Date.now(),
+      filePath: state.filePath || null,
+      document: editor.doc,
+    });
+  } catch (error) {
+    showRecoveryWarning();
+    console.error('Could not prepare local recovery data:', error);
+    return Promise.resolve(false);
+  }
+  const operation = recoveryQueue.then(async () => {
+    if (native) return native.writeRecovery(payload);
+    return writeAutosave(editor.doc, state.filePath);
+  });
+  recoveryQueue = operation.catch(() => {});
+  operation.then((ok) => {
+    if (ok === false) showRecoveryWarning();
+    else hideRecoveryWarning();
+  }).catch((error) => {
+    showRecoveryWarning();
+    console.error('Could not write local recovery data:', error);
+  });
+  return operation;
+}
+
+function clearRecoveryData() {
+  const operation = recoveryQueue.then(async () => {
+      clearAutosave();
+      if (native) await native.clearRecovery();
+      hideRecoveryWarning();
+      return true;
+    }).catch((error) => {
+      showRecoveryWarning();
+      console.error('Could not clear local recovery data:', error);
+      return false;
+    });
+  recoveryQueue = operation;
+  return operation;
+}
+
+function showRecoveryWarning() {
+  state.recoveryUnavailable = true;
+  if (dom.recoveryWarning) dom.recoveryWarning.hidden = false;
+  toast('Recovery is unavailable. Save your screenplay now.', 12000);
+}
+
+function hideRecoveryWarning() {
+  state.recoveryUnavailable = false;
+  if (dom.recoveryWarning) dom.recoveryWarning.hidden = true;
 }
 
 async function offerRecovery(recovered) {
@@ -261,12 +371,22 @@ async function offerRecovery(recovered) {
     buttons: ['Recover', 'Discard'],
   });
   if (choice === 0) {
-    editor.load(normalizeDocument(recovered.document));
-    state.filePath = recovered.filePath;
-    markDirty();
-    toast('Recovered your last autosave.');
+    try {
+      editor.load(normalizeDocument(recovered.document));
+      // File-access grants intentionally do not survive a restart. A recovered
+      // draft must use Save As instead of silently trusting yesterday's path.
+      state.filePath = null;
+      markDirty();
+      toast('Recovered your last autosave. Use Save As to keep it.');
+    } catch (error) {
+      await clearRecoveryData();
+      platform.error({
+        message: 'That recovery copy could not be restored safely.',
+        detail: String(error.message || error),
+      });
+    }
   } else {
-    clearAutosave();
+    await clearRecoveryData();
   }
 }
 
@@ -279,7 +399,7 @@ function buildElementSelect() {
   ELEMENT_ORDER.forEach((type, i) => {
     const opt = document.createElement('option');
     opt.value = type;
-    opt.textContent = `${ELEMENT_LABEL[type]}   ⌘${i + 1}`;
+    opt.textContent = `${ELEMENT_LABEL[type]}   Ctrl/⌘ ${i + 1}`;
     dom.elementSelect.appendChild(opt);
   });
   dom.elementSelect.addEventListener('change', () => {
@@ -291,6 +411,7 @@ function buildElementSelect() {
 function wireToolbar() {
   const on = (id, fn) => document.getElementById(id).addEventListener('click', fn);
 
+  on('tb-menu', appMenuDialog);
   on('tb-sidebar', toggleSidebar);
   on('tb-bold', () => editor.toggleStyle('bold'));
   on('tb-italic', () => editor.toggleStyle('italic'));
@@ -324,15 +445,19 @@ function wireFocusControls() {
   document.getElementById('focus-end').addEventListener('click', finishWritingSprint);
   document.getElementById('focus-exit').addEventListener('click', toggleFocusMode);
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'F6' && !dom.focusHud.hidden) {
+    if (event.key === 'F6') {
       event.preventDefault();
-      if (event.shiftKey || dom.focusHud.contains(document.activeElement)) {
-        dom.pages.focus();
-      } else {
-        const target = [...dom.focusHud.querySelectorAll('button')].find(
-          (button) => !button.hidden && !button.disabled
-        );
+      const active = document.activeElement;
+      if (active === dom.pages || dom.pages.contains(active)) {
+        const target = !dom.focusHud.hidden
+          ? [...dom.focusHud.querySelectorAll('button')].find(
+              (button) => !button.hidden && !button.disabled
+            )
+          : [...document.querySelectorAll('#toolbar button:not([hidden]), #toolbar select:not([hidden])')]
+              .find((control) => control.getClientRects().length);
         target?.focus();
+      } else {
+        dom.pages.focus();
       }
       return;
     }
@@ -344,6 +469,68 @@ function wireFocusControls() {
       event.preventDefault();
       setFocusMode(false);
     }
+  });
+}
+
+function appMenuDialog() {
+  const action = (label, run) =>
+    h('button', {
+      type: 'button',
+      class: 'btn app-menu-command',
+      onClick: () => {
+        closeDialog();
+        Promise.resolve().then(run).catch((error) =>
+          platform.error({ message: `${label} failed.`, detail: String(error.message || error) })
+        );
+      },
+    }, label);
+  const group = (name, commands) => h(
+    'section',
+    { class: 'app-menu-group', 'aria-label': name },
+    h('h3', {}, name),
+    h('div', { class: 'app-menu-grid' }, ...commands)
+  );
+  const body = h(
+    'div',
+    { class: 'app-menu' },
+    group('File', [
+      action('New Screenplay', newDocument),
+      action('Open…', () => openFile()),
+      action('Save', () => saveFile(false)),
+      action('Save As…', () => saveFile(true)),
+      action('Export PDF…', exportPdf),
+      action('Export Final Draft…', () => exportInterchangeWithAlternates('fdx', () => toFDX(editor.doc))),
+      action('Export Fountain…', () => exportInterchangeWithAlternates('fountain', () => toFountain(editor.doc))),
+      action('Export Plain Text…', () => exportText(toPlainText(editor.doc, editor.pagination, editor.styles), 'text')),
+    ]),
+    group('Document', [
+      action('Title Page', () => titlePageDialog(editor)),
+      action('Page Setup', () => pageSetupDialog(editor)),
+      action('Scene Numbers', () => sceneNumbersDialog(editor)),
+      action('Revision Sets', () => revisionsDialog(editor, toast)),
+      action('Revision Room', openRevisionRoom),
+      action('Format Assistant', openFormatAssistant),
+      action('Add Alternate Dialogue', () => editor.addAlternateDialogue()),
+      action('Previous Alternate Dialogue', () => stepCurrentAlternate(-1)),
+      action('Next Alternate Dialogue', () => stepCurrentAlternate(1)),
+      action('Remove Alternate Dialogue', removeCurrentAlternate),
+      action('Production Reports', openReports),
+      action('Table Read', () => tableReadDialog(editor)),
+    ]),
+    group('View & Help', [
+      action('Index Cards', () => toggleCards('cards')),
+      action('Story Timeline', () => toggleCards('timeline')),
+      action('Focus Mode', toggleFocusMode),
+      action('Keyboard Shortcuts', shortcutsDialog),
+      action('Privacy & Local Data', privacyDialog),
+    ])
+  );
+  openDialog({
+    title: 'Scriptum Menu',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+    initialFocus: '.app-menu-command',
   });
 }
 
@@ -524,6 +711,9 @@ function wireMenus() {
   m('menu:underline', () => editor.toggleStyle('underline'));
   m('menu:dual', toggleDualDialogue);
   m('menu:add-alternate', () => editor.addAlternateDialogue());
+  m('menu:previous-alternate', () => stepCurrentAlternate(-1));
+  m('menu:next-alternate', () => stepCurrentAlternate(1));
+  m('menu:remove-alternate', removeCurrentAlternate);
   m('menu:production-tag', () => productionTagDialog(editor, { toast }));
   m('menu:toggle-production-tags', toggleProductionTags);
 
@@ -604,6 +794,21 @@ function wireMenus() {
       tableReadDialog(editor);
       return;
     }
+    if (e.altKey && e.key === 'ArrowLeft') {
+      e.preventDefault();
+      stepCurrentAlternate(-1);
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowRight') {
+      e.preventDefault();
+      stepCurrentAlternate(1);
+      return;
+    }
+    if (e.altKey && e.key === 'Backspace') {
+      e.preventDefault();
+      removeCurrentAlternate();
+      return;
+    }
     if (map[k] && !(k === 'b' || k === 'i' || k === 'u')) {
       e.preventDefault();
       map[k]();
@@ -633,7 +838,7 @@ function privacyDialog() {
         label: 'Clear & Disable Recovery',
         onClick: () => {
           state.recoveryEnabled = false;
-          clearAutosave();
+          void clearRecoveryData();
           toast('Recovery cleared and disabled until restart.');
         },
       },
@@ -663,16 +868,20 @@ async function newDocument() {
   resetWritingSprint();
   editor.load(createDocument());
   state.filePath = null;
-  clearAutosave();
+  await clearRecoveryData();
   markClean();
   toast('New screenplay.');
 }
 
 async function openFile(kinds) {
   if (!(await confirmDiscard())) return;
-  const picked = await platform.open(kinds);
-  if (!picked) return;
-  loadFromText(picked.path, picked.data);
+  try {
+    const picked = await platform.open(kinds);
+    if (!picked) return;
+    await loadFromText(picked.path, picked.data);
+  } catch (err) {
+    platform.error({ message: 'Could not open that file.', detail: String(err.message || err) });
+  }
 }
 
 async function openPath(path) {
@@ -680,15 +889,18 @@ async function openPath(path) {
   if (!(await confirmDiscard())) return;
   try {
     const data = await native.readFile(path);
-    loadFromText(path, data);
+    await loadFromText(path, data);
   } catch (err) {
     platform.error({ message: 'Could not open that file.', detail: String(err.message || err) });
   }
 }
 
-function loadFromText(path, data) {
+async function loadFromText(path, data) {
   const ext = (path.split('.').pop() || '').toLowerCase();
   try {
+    if (typeof data !== 'string' || data.length > MAX_PROJECT_FILE_BYTES) {
+      throw new Error('That file is too large for Scriptum to open safely.');
+    }
     let doc;
     if (ext === 'fdx') doc = parseFDX(data);
     else if (ext === 'fountain' || ext === 'spmd') doc = parseFountain(data);
@@ -696,7 +908,8 @@ function loadFromText(path, data) {
     else if (ext === 'txt') doc = docFromPlainText(data);
     else doc = data.trimStart().startsWith('{') ? parseProject(data) : parseFountain(data);
 
-    clearAutosave();
+    assertDocumentBudget(doc);
+    await clearRecoveryData();
     resetWritingSprint();
     editor.load(doc);
     state.filePath = ext === 'scriptum' ? path : null; // imports save to a new file
@@ -717,36 +930,45 @@ function docFromPlainText(text) {
   return doc;
 }
 
-async function saveFile(forceDialog) {
-  const name = suggestedName('scriptum');
-  const text = serializeProject(editor.doc);
-
-  if (state.filePath && !forceDialog) {
+function saveFile(forceDialog) {
+  return saveCoordinator.enqueue(async (revision) => {
+    const name = suggestedName('scriptum');
+    const text = serializeProject(editor.doc);
     try {
-      await platform.writeTo(state.filePath, text);
-      clearAutosave();
-      markClean();
-      toast(`Saved ${baseName(state.filePath)}.`);
-      return state.filePath;
+      let savedPath = state.filePath;
+      if (savedPath && !forceDialog) {
+        await platform.writeTo(savedPath, text);
+      } else {
+        savedPath = await platform.save(text, { defaultName: name, kind: 'scriptum' });
+        if (!savedPath) return null;
+        state.filePath = savedPath;
+      }
+
+      if (markClean(revision)) {
+        await clearRecoveryData();
+        toast(`Saved ${baseName(savedPath)}.`);
+      } else {
+        await writeRecoveryData();
+        toast(`Saved ${baseName(savedPath)}; newer edits remain unsaved.`);
+      }
+      return savedPath;
     } catch (err) {
       platform.error({ message: 'Could not save.', detail: String(err.message || err) });
       return null;
     }
-  }
-
-  const path = await platform.save(text, { defaultName: name, kind: 'scriptum' });
-  if (!path) return null;
-  state.filePath = path;
-  clearAutosave();
-  markClean();
-  toast(`Saved ${baseName(path)}.`);
-  return path;
+  });
 }
 
 async function exportText(text, kind) {
   const ext = { fdx: 'fdx', fountain: 'fountain', text: 'txt', csv: 'csv' }[kind] || 'txt';
-  const path = await platform.save(text, { defaultName: suggestedName(ext), kind });
-  if (path) toast(`Exported ${baseName(path)}.`);
+  try {
+    const path = await platform.save(text, { defaultName: suggestedName(ext), kind });
+    if (path) toast(`Exported ${baseName(path)}.`);
+    return path;
+  } catch (error) {
+    platform.error({ message: 'Could not export.', detail: String(error.message || error) });
+    return null;
+  }
 }
 
 async function exportInterchangeWithAlternates(kind, buildText) {
@@ -766,7 +988,7 @@ async function exportInterchangeWithAlternates(kind, buildText) {
       message: `Export screenplay text to ${label}?`,
       detail:
         `${label} export does not carry ${omissions}. ` +
-        'That information remains safe in the .scriptum file.',
+        'Save as .scriptum to preserve that information in the complete project file.',
       buttons: ['Export Screenplay Text', 'Cancel'],
       defaultId: 1,
     });
@@ -849,7 +1071,7 @@ async function requestClose() {
   let confirmed = false;
   try {
     confirmed = await confirmDiscard();
-    if (confirmed) clearAutosave();
+    if (confirmed) await clearRecoveryData();
   } catch (err) {
     // Never let a failure here trap the user inside the application.
     console.error('Close check failed, allowing the close anyway:', err);
@@ -992,8 +1214,19 @@ function jumpToScene(sceneId) {
 
 function openReports() {
   reportsDialog(editor, {
-    onExportCSV: (csv, name) =>
-      platform.save(csv, { defaultName: `${suggestedName('csv').replace('.csv', '')}-${name}.csv`, kind: 'csv' }),
+    onExportCSV: async (csv, name) => {
+      try {
+        const path = await platform.save(csv, {
+          defaultName: `${suggestedName('csv').replace('.csv', '')}-${name}.csv`,
+          kind: 'csv',
+        });
+        if (path) toast(`Exported ${baseName(path)}.`);
+        return path;
+      } catch (error) {
+        platform.error({ message: 'Could not export CSV.', detail: String(error.message || error) });
+        return null;
+      }
+    },
     onJumpToScene: jumpToScene,
   });
 }
@@ -1305,6 +1538,25 @@ async function confirmDeleteAlternate(elementId) {
   if (choice === 0) editor.deleteActiveAlternateDialogue(elementId);
 }
 
+function stepCurrentAlternate(direction) {
+  const element = editor.currentElement();
+  if (!element || !hasAlternateDialogue(element)) {
+    toast('The current dialogue has no stored alternatives.');
+    return false;
+  }
+  return editor.stepAlternateDialogue(element.id, direction);
+}
+
+function removeCurrentAlternate() {
+  const element = editor.currentElement();
+  if (!element || !hasAlternateDialogue(element)) {
+    toast('The current dialogue has no stored alternatives.');
+    return false;
+  }
+  void confirmDeleteAlternate(element.id);
+  return true;
+}
+
 function refreshStatus() {
   const p = editor.pagination;
   if (!p) return;
@@ -1517,25 +1769,29 @@ function renderBreakdownPane() {
  * ------------------------------------------------------------------ */
 
 function markDirty() {
+  saveCoordinator.noteMutation();
   if (!state.dirty) {
     state.dirty = true;
     platform.setTitle(editor.doc.title.title || 'Untitled', true);
   }
 }
 
-function markClean() {
+function markClean(expectedRevision = null) {
+  if (expectedRevision !== null && !saveCoordinator.isCurrent(expectedRevision)) return false;
+  if (expectedRevision === null) saveCoordinator.resetBaseline();
   state.dirty = false;
   platform.setTitle(editor.doc.title.title || 'Untitled', false);
   refreshStatus();
   refreshSidebar();
+  return true;
 }
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, duration = 2600) {
   dom.toast.textContent = message;
   dom.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => dom.toast.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => dom.toast.classList.remove('show'), duration);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1562,7 +1818,18 @@ function sampleDocument() {
   return doc;
 }
 
-boot();
+void boot().catch((error) => {
+  console.error('Scriptum could not finish starting:', error);
+  platform.error({ message: 'Scriptum could not finish starting.', detail: String(error.message || error) });
+});
 
 // Handy from the console and from automated checks; reads live state only.
-window.__scriptum = { editor, finder, board, timeline, state, platform };
+window.__scriptum = {
+  editor,
+  finder,
+  board,
+  timeline,
+  state,
+  platform,
+  commands: { saveFile, openFile, newDocument },
+};

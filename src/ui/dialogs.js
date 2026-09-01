@@ -99,7 +99,7 @@ export function h(tag, props = {}, ...children) {
 let closeCurrent = null;
 let fieldCounter = 0;
 
-export function openDialog({ title, body, buttons = [], wide = false, onClose }) {
+export function openDialog({ title, body, buttons = [], wide = false, onClose, initialFocus = null }) {
   // One modal shell serves the whole application. Close the current owner
   // before replacing its DOM so feature-specific cleanup (speech, timers,
   // listeners) can never become unreachable behind a newer dialog.
@@ -150,7 +150,7 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
-    } else if (e.key === 'Enter' && e.metaKey) {
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       const primary = buttons.find((b) => b.primary);
       if (primary) {
         const keepOpen = primary.onClick?.();
@@ -180,9 +180,15 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
 
   appEl.inert = true;
   overlay.classList.remove('hidden');
+  const requested = typeof initialFocus === 'string'
+    ? dialog.querySelector(initialFocus)
+    : initialFocus;
   const firstInput = bodyEl.querySelector('input, textarea, select');
+  const primaryButton = [...footEl.querySelectorAll('button')].find(
+    (_button, index) => buttons[index]?.primary
+  );
   const firstButton = footEl.querySelector('button');
-  (firstInput || firstButton || dialog).focus();
+  (requested || firstInput || primaryButton || firstButton || dialog).focus();
   return close;
 }
 
@@ -532,10 +538,18 @@ export function sceneNumbersDialog(editor) {
  * ------------------------------------------------------------------ */
 
 export function revisionsDialog(editor, toast) {
-  const rev = editor.doc.revisions;
+  const rev = JSON.parse(JSON.stringify(editor.doc.revisions));
+
+  const commitRevisionState = () => {
+    editor.commit(() => {
+      editor.doc.revisions = JSON.parse(JSON.stringify(rev));
+      return null;
+    });
+    editor.hardRender(null);
+  };
 
   const list = h('div', {});
-  const rebuild = () => {
+  const rebuild = (focusKey = '') => {
     list.innerHTML = '';
     if (!rev.sets.length) {
       list.appendChild(
@@ -564,9 +578,10 @@ export function revisionsDialog(editor, toast) {
             'button',
             {
               class: `btn${active ? ' active' : ''}`,
+              'data-revision-action': `current-${set.id}`,
               onClick: () => {
                 rev.current = active ? null : set.id;
-                rebuild();
+                rebuild(`current-${set.id}`);
               },
             },
             active ? 'Marking' : 'Set current'
@@ -575,10 +590,10 @@ export function revisionsDialog(editor, toast) {
             'button',
             {
               class: 'btn',
+              'data-revision-action': `visible-${set.id}`,
               onClick: () => {
                 set.active = !set.active;
-                rebuild();
-                editor.hardRender(null);
+                rebuild(`visible-${set.id}`);
               },
             },
             set.active === false ? 'Show' : 'Hide'
@@ -586,6 +601,7 @@ export function revisionsDialog(editor, toast) {
         )
       );
     }
+    if (focusKey) list.querySelector(`[data-revision-action="${focusKey}"]`)?.focus();
   };
   rebuild();
 
@@ -611,18 +627,24 @@ export function revisionsDialog(editor, toast) {
         { style: { display: 'flex', gap: '5px', flexWrap: 'wrap' } },
         ...REV_COLORS.map((c) => {
           const chip = h(
-            'span',
+            'label',
             {
               class: `rev-chip${c.color === draft.color ? ' on' : ''}`,
-              onClick: (e) => {
+            },
+            h('input', {
+              type: 'radio',
+              name: 'revision-colour',
+              value: c.color,
+              checked: c.color === draft.color,
+              onChange: (e) => {
                 draft.color = c.color;
                 draft.name = draft.name.replace(/^\w+ Revision$/, `${c.name} Revision`);
-                e.currentTarget.parentElement
+                e.currentTarget.closest('div')
                   .querySelectorAll('.rev-chip')
                   .forEach((x) => x.classList.remove('on'));
-                e.currentTarget.classList.add('on');
+                e.currentTarget.closest('.rev-chip').classList.add('on');
               },
-            },
+            }),
             h('span', { class: 'dot', style: { background: c.color } }),
             c.name
           );
@@ -641,12 +663,10 @@ export function revisionsDialog(editor, toast) {
       {
         label: 'Start New Revision',
         onClick: () => {
-          editor.commit(() => {
-            const id = `r${rev.sets.length + 1}`;
-            rev.sets.push({ ...draft, id, mark: '*', active: true });
-            rev.current = id;
-            return null;
-          });
+          const id = `r${Date.now().toString(36)}`;
+          rev.sets.push({ ...draft, id, mark: '*', active: true });
+          rev.current = id;
+          commitRevisionState();
           toast?.(`Now marking changes as "${draft.name}".`);
         },
       },
@@ -654,7 +674,7 @@ export function revisionsDialog(editor, toast) {
       {
         label: 'Done',
         primary: true,
-        onClick: () => editor.hardRender(null),
+        onClick: commitRevisionState,
       },
     ],
   });
@@ -1390,15 +1410,25 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
 
   const tabs = ['Summary', 'Scenes', 'Characters', 'Locations', 'Breakdown'];
   let active = 'Summary';
+  let exportButton = null;
 
-  const content = h('div', {});
-  const tabBar = h('div', { class: 'side-tabs', style: { padding: '0 0 12px' } });
+  const content = h('div', { id: 'reports-panel', role: 'tabpanel' });
+  const tabBar = h('div', {
+    class: 'side-tabs',
+    style: { padding: '0 0 12px' },
+    role: 'tablist',
+    'aria-label': 'Report type',
+  });
 
   const draw = () => {
     content.innerHTML = '';
     tabBar.querySelectorAll('.side-tab').forEach((b) => {
-      b.classList.toggle('active', b.textContent === active);
+      const selected = b.textContent === active;
+      b.classList.toggle('active', selected);
+      b.setAttribute('aria-selected', String(selected));
+      b.tabIndex = selected ? 0 : -1;
     });
+    if (exportButton) exportButton.disabled = active === 'Summary';
 
     if (active === 'Summary') content.appendChild(summaryPane(doc, pagination, styles));
     else if (active === 'Scenes') {
@@ -1416,15 +1446,32 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
     }
   };
 
-  for (const t of tabs) {
+  const activateTab = (name, focus = false) => {
+    active = name;
+    draw();
+    if (focus) [...tabBar.querySelectorAll('.side-tab')].find((button) => button.textContent === name)?.focus();
+  };
+
+  for (const [index, t] of tabs.entries()) {
     tabBar.appendChild(
       h(
         'button',
         {
           class: `side-tab${t === active ? ' active' : ''}`,
-          onClick: () => {
-            active = t;
-            draw();
+          role: 'tab',
+          'aria-selected': t === active ? 'true' : 'false',
+          'aria-controls': 'reports-panel',
+          tabindex: t === active ? '0' : '-1',
+          onClick: () => activateTab(t),
+          onKeydown: (event) => {
+            let target = index;
+            if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+            else if (event.key === 'ArrowLeft') target = (index - 1 + tabs.length) % tabs.length;
+            else if (event.key === 'Home') target = 0;
+            else if (event.key === 'End') target = tabs.length - 1;
+            else return;
+            event.preventDefault();
+            activateTab(tabs[target], true);
           },
         },
         t
@@ -1458,6 +1505,8 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
       { label: 'Close', primary: true },
     ],
   });
+  exportButton = document.querySelector('#dialog-foot button');
+  if (exportButton) exportButton.disabled = true;
 }
 
 function summaryPane(doc, pagination, styles) {
@@ -1535,18 +1584,21 @@ function table(rows, columns, onRowClick) {
   return h(
     'table',
     { class: 'data' },
-    h('thead', {}, h('tr', {}, ...columns.map((c) => h('th', {}, c.label)))),
+    h('thead', {}, h('tr', {}, ...columns.map((c) => h('th', {}, c.label)), onRowClick ? h('th', {}, 'Action') : null)),
     h(
       'tbody',
       {},
       ...rows.map((r) =>
         h(
           'tr',
-          { style: onRowClick ? { cursor: 'pointer' } : {}, onClick: () => onRowClick?.(r) },
+          {},
           ...columns.map((c) => {
             const v = c.get(r);
             return h('td', { class: typeof v === 'number' ? 'num' : '' }, Array.isArray(v) ? v.join(', ') : String(v ?? ''));
-          })
+          }),
+          onRowClick
+            ? h('td', {}, h('button', { class: 'btn', type: 'button', onClick: () => onRowClick(r) }, 'Go to scene'))
+            : null
         )
       )
     )
@@ -1779,20 +1831,44 @@ export function tableReadDialog(editor) {
     next,
     h('label', { class: 'table-read-rate' }, 'Speed', rate, rateValue)
   );
-  const list = h('div', { class: 'table-read-list', 'aria-label': 'Table-read lines' });
-  const lineButtons = segments.map((entry, index) => {
-    const button = h(
-      'button',
-      {
-        class: 'table-read-line',
-        type: 'button',
-      },
-      h('b', {}, entry.speaker),
-      h('span', {}, entry.text)
-    );
-    list.appendChild(button);
-    return button;
+  const list = h('div', {
+    class: 'table-read-list',
+    'aria-label': 'Table-read lines',
+    role: 'listbox',
+    tabindex: '0',
   });
+  const lineButtons = new Map();
+  let controller = null;
+  const renderLineWindow = (center = 0) => {
+    const windowSize = 200;
+    const start = Math.max(0, Math.min(
+      Math.max(0, segments.length - windowSize),
+      center - Math.floor(windowSize / 2)
+    ));
+    const end = Math.min(segments.length, start + windowSize);
+    list.innerHTML = '';
+    lineButtons.clear();
+    for (let index = start; index < end; index += 1) {
+      const entry = segments[index];
+      const option = h(
+        'div',
+        {
+          id: `table-read-line-${index}`,
+          class: 'table-read-line',
+          role: 'option',
+          'aria-selected': index === center ? 'true' : 'false',
+          onClick: () => controller?.seek(index, { autoplay: controller.status === 'playing' }),
+        },
+        h('b', {}, entry.speaker),
+        h('span', {}, entry.text)
+      );
+      list.appendChild(option);
+      lineButtons.set(index, option);
+    }
+    const active = lineButtons.get(center);
+    if (active) list.setAttribute('aria-activedescendant', active.id);
+  };
+  renderLineWindow(0);
 
   const resolveVoice = (entry) => {
     const role = entry.kind === 'narration' ? 'Narrator' : entry.speaker;
@@ -1800,7 +1876,7 @@ export function tableReadDialog(editor) {
     return voices.find((voice) => voiceKey(voice) === key) || null;
   };
 
-  const controller = new TableReadController({
+  controller = new TableReadController({
     synthesis,
     Utterance,
     onUpdate: (snapshot) => {
@@ -1822,11 +1898,15 @@ export function tableReadDialog(editor) {
       if (activeLine) {
         activeLine.classList.remove('active');
         activeLine.removeAttribute('aria-current');
+        activeLine.setAttribute('aria-selected', 'false');
       }
-      activeLine = lineButtons[snapshot.index] || null;
+      if (!lineButtons.has(snapshot.index)) renderLineWindow(snapshot.index);
+      activeLine = lineButtons.get(snapshot.index) || null;
       if (activeLine) {
         activeLine.classList.add('active');
         activeLine.setAttribute('aria-current', 'true');
+        activeLine.setAttribute('aria-selected', 'true');
+        list.setAttribute('aria-activedescendant', activeLine.id);
         if (snapshot.status === 'playing') activeLine.scrollIntoView({ block: 'nearest' });
       }
     },
@@ -1887,8 +1967,23 @@ export function tableReadDialog(editor) {
     const value = controller.setRate(Number(rate.value));
     rateValue.textContent = `${value.toFixed(1)}×`;
   });
-  lineButtons.forEach((button, index) => {
-    button.addEventListener('click', () => controller.seek(index, { autoplay: controller.status === 'playing' }));
+  list.addEventListener('keydown', (event) => {
+    let index = controller.index;
+    if (event.key === 'ArrowDown') index += 1;
+    else if (event.key === 'ArrowUp') index -= 1;
+    else if (event.key === 'PageDown') index += 20;
+    else if (event.key === 'PageUp') index -= 20;
+    else if (event.key === 'Home') index = 0;
+    else if (event.key === 'End') index = segments.length - 1;
+    else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      controller.play();
+      return;
+    } else return;
+    event.preventDefault();
+    controller.seek(Math.max(0, Math.min(segments.length - 1, index)), {
+      autoplay: controller.status === 'playing',
+    });
   });
 
   const onVoicesChanged = () => refreshVoices();
@@ -1993,40 +2088,44 @@ export function shortcutsDialog() {
         ['Tab', 'Cycle element type — or add a parenthetical after a cue'],
         ['Shift-Tab', 'Cycle backwards'],
         ['Backspace at start', 'Merge into the element above'],
-        ['⌘1 – ⌘9', 'Set element type directly'],
+        ['Ctrl/⌘ + 1–9', 'Set element type directly'],
+        ['Escape', 'Move from the screenplay to inline tools or the toolbar'],
       ],
     ],
     [
       'Format',
       [
-        ['⌘B / ⌘I / ⌘U', 'Bold, italic, underline'],
-        ['⌘⌥D', 'Toggle dual dialogue'],
+        ['Ctrl/⌘ + B / I / U', 'Bold, italic, underline'],
+        ['Ctrl/⌘ + Alt + D', 'Toggle dual dialogue'],
+        ['Ctrl/⌘ + Alt + L', 'Add alternate dialogue'],
+        ['Ctrl/⌘ + Alt + ← / →', 'Previous / next alternate dialogue'],
+        ['Ctrl/⌘ + Alt + Backspace', 'Remove current alternate dialogue'],
       ],
     ],
     [
       'Navigate',
       [
-        ['⌘F', 'Find and replace'],
-        ['⌘G / ⌘⇧G', 'Find next / previous'],
-        ['⌘J', 'Go to scene'],
-        ['⌘\\', 'Toggle sidebar'],
-        ['⌘⇧B', 'Index cards'],
-        ['⌘⇧F', 'Focus mode'],
-        ['⌘⇧K', 'Writing sprint'],
-        ['F6', 'Move between the screenplay and sprint controls'],
-        ['⌘⇧Space', 'Pause or resume a sprint'],
-        ['⌘⇧E', 'End a sprint'],
-        ['⌘⇧Y', 'Open Table Read'],
-        ['⌘R', 'Reports'],
+        ['Ctrl/⌘ + F', 'Find and replace'],
+        ['Ctrl/⌘ + G / Shift + G', 'Find next / previous'],
+        ['Ctrl/⌘ + J', 'Go to scene'],
+        ['Ctrl/⌘ + \\', 'Toggle sidebar'],
+        ['Ctrl/⌘ + Shift + B', 'Index cards'],
+        ['Ctrl/⌘ + Shift + F', 'Focus mode'],
+        ['Ctrl/⌘ + Shift + K', 'Writing sprint'],
+        ['F6', 'Move between the screenplay and app controls'],
+        ['Ctrl/⌘ + Shift + Space', 'Pause or resume a sprint'],
+        ['Ctrl/⌘ + Shift + E', 'End a sprint'],
+        ['Ctrl/⌘ + Shift + Y', 'Open Table Read'],
+        ['Ctrl/⌘ + R', 'Reports'],
       ],
     ],
     [
       'File',
       [
-        ['⌘S', 'Save'],
-        ['⌘P', 'Export PDF'],
-        ['⌘O', 'Open'],
-        ['⌘Z / ⌘⇧Z', 'Undo / redo'],
+        ['Ctrl/⌘ + S', 'Save'],
+        ['Ctrl/⌘ + P', 'Export PDF'],
+        ['Ctrl/⌘ + O', 'Open'],
+        ['Ctrl/⌘ + Z / Shift + Z', 'Undo / redo'],
       ],
     ],
   ];

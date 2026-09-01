@@ -18,9 +18,13 @@
         <span id="doc-dirty"></span>
       </div>
 
-      <div id="toolbar" role="toolbar" aria-label="Screenplay formatting and tools">
+      <div id="toolbar" aria-label="Screenplay formatting and tools">
+        <div class="tb-group web-only">
+          <button class="btn primary" id="tb-menu" title="All Scriptum commands">Menu</button>
+        </div>
+        <div class="tb-sep web-only"></div>
         <div class="tb-group">
-          <button class="btn icon" id="tb-sidebar" title="Toggle sidebar (⌘\)" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
+          <button class="btn icon" id="tb-sidebar" title="Toggle sidebar (Ctrl/⌘ + \)" aria-label="Toggle sidebar" aria-controls="sidebar" aria-expanded="true">☰</button>
         </div>
         <div class="tb-sep"></div>
 
@@ -30,9 +34,9 @@
         <div class="tb-sep"></div>
 
         <div class="tb-group">
-          <button class="btn icon" id="tb-bold" title="Bold (⌘B)" aria-label="Bold"><b>B</b></button>
-          <button class="btn icon" id="tb-italic" title="Italic (⌘I)" aria-label="Italic"><i>I</i></button>
-          <button class="btn icon" id="tb-underline" title="Underline (⌘U)" aria-label="Underline"><u>U</u></button>
+          <button class="btn icon" id="tb-bold" title="Bold (Ctrl/⌘ + B)" aria-label="Bold"><b>B</b></button>
+          <button class="btn icon" id="tb-italic" title="Italic (Ctrl/⌘ + I)" aria-label="Italic"><i>I</i></button>
+          <button class="btn icon" id="tb-underline" title="Underline (Ctrl/⌘ + U)" aria-label="Underline"><u>U</u></button>
         </div>
         <div class="tb-sep"></div>
 
@@ -46,7 +50,7 @@
         <div class="tb-sep"></div>
 
         <div class="tb-group">
-          <button class="btn" id="tb-cards" title="Index cards (⌘⇧B)">Cards</button>
+          <button class="btn" id="tb-cards" title="Index cards (Ctrl/⌘ + Shift + B)">Cards</button>
           <button class="btn" id="tb-timeline" title="Acts, sequences, story lanes, and beats">Timeline</button>
           <button class="btn" id="tb-find" title="Find &amp; Replace (⌘F)">Find</button>
         </div>
@@ -67,7 +71,7 @@
           <button class="btn" id="tb-sprint" title="Start a timed writing sprint (⌘⇧K)" aria-pressed="false">Sprint</button>
         </div>
 
-        <div style="flex: 1"></div>
+        <div class="tb-spacer"></div>
 
         <div class="tb-group">
           <button class="btn" id="tb-privacy" title="Privacy and local recovery data">Privacy</button>
@@ -99,7 +103,7 @@
               role="textbox"
               aria-label="Screenplay editor"
               aria-multiline="true"
-              spellcheck="true"
+              spellcheck="false"
               autocorrect="off"
               autocapitalize="off"
             ></div>
@@ -152,12 +156,13 @@
         </div>
       </div>
 
-      <div id="statusbar" role="status" aria-live="polite">
+      <div id="statusbar" role="group" aria-label="Document status">
         <span id="st-page">Page 1 of 1</span>
         <span id="st-scene"></span>
         <span id="st-runtime"></span>
         <span class="sp"></span>
         <span id="st-words"></span>
+        <strong id="recovery-warning" hidden>Recovery unavailable — save now</strong>
         <span id="st-element"></span>
         <label style="display: flex; align-items: center; gap: 6px">
           <span>Zoom</span>

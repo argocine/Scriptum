@@ -74,16 +74,24 @@ textarea {
 #titlebar {
   height: 38px;
   flex: none;
-  -webkit-app-region: drag;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding-left: 78px; /* clear the macOS traffic lights */
+  padding-left: 12px;
   padding-right: 12px;
   gap: 8px;
   user-select: none;
+}
+
+html[data-platform='darwin'] #titlebar {
+  -webkit-app-region: drag;
+  padding-left: 78px; /* clear the macOS traffic lights */
+}
+
+html[data-runtime='native'] .web-only {
+  display: none !important;
 }
 
 #doc-title {
@@ -104,17 +112,19 @@ textarea {
   padding: 6px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-#toolbar::-webkit-scrollbar {
-  display: none;
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 4px;
+  overflow: visible;
 }
 
 .tb-group {
   display: flex;
   align-items: center;
   gap: 3px;
+}
+.tb-spacer {
+  flex: 1 1 12px;
 }
 .tb-sep {
   width: 1px;
@@ -143,6 +153,74 @@ textarea {
 .btn:hover {
   background: var(--panel-2);
   border-color: var(--border);
+}
+
+.app-menu {
+  display: grid;
+  gap: 18px;
+}
+.app-menu-group h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.app-menu-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.app-menu-command {
+  justify-content: flex-start;
+  min-height: 34px;
+  height: auto;
+  padding-top: 7px;
+  padding-bottom: 7px;
+  line-height: 1.2;
+  text-align: left;
+  white-space: normal;
+  border-color: var(--border);
+  background: var(--panel-2);
+}
+
+#recovery-warning {
+  color: var(--danger, #b42318);
+  white-space: nowrap;
+}
+
+@media (max-width: 1450px) {
+  .tb-spacer {
+    display: none;
+  }
+}
+
+@media (max-width: 1050px) {
+  #sidebar {
+    width: 230px;
+  }
+  .dialog .foot,
+  .row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 760px) {
+  #sidebar {
+    position: absolute;
+    z-index: 20;
+    top: 0;
+    bottom: 0;
+    width: min(82vw, 288px);
+    box-shadow: 8px 0 24px #0003;
+  }
+  #element-select {
+    max-width: 145px;
+  }
+  .dialog {
+    width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+  }
 }
 .btn:active {
   transform: translateY(0.5px);

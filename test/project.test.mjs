@@ -53,12 +53,29 @@ t('rejects malformed, foreign, future, and invalid-version files', () => {
   assert.throws(() => parseProject('{'), /not valid Scriptum JSON/i);
   assert.throws(() => parseProject('{}'), /not written by Scriptum/i);
   assert.throws(
-    () => parseProject(payload({}, { formatVersion: 2 })),
+    () => parseProject(payload({}, { formatVersion: 3 })),
     /newer version of Scriptum/i
   );
   assert.throws(
     () => parseProject(payload({}, { formatVersion: 'one' })),
     /invalid Scriptum format version/i
+  );
+});
+
+t('writes format version 2 while retaining version 1 compatibility', () => {
+  assert.equal(JSON.parse(serializeProject(createDocument())).formatVersion, 2);
+  assert.equal(parseProject(payload(createDocument())).elements.length, 1);
+});
+
+t('refuses documents that exceed explicit model budgets', () => {
+  const categories = Array.from({ length: 501 }, (_, index) => ({
+    id: `category-${index}`,
+    name: `Category ${index}`,
+    color: '#123456',
+  }));
+  assert.throws(
+    () => parseProject(payload({ production: { schemaVersion: 1, categories, items: [] } })),
+    /more production categories/i
   );
 });
 

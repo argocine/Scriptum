@@ -28,15 +28,27 @@ HTTP(S) traffic is blocked, permissions are denied by default, navigation is
 restricted to application pages, and the only external help URL is exactly
 allowlisted. Release builds use ASAR integrity and restrictive Electron fuses.
 
+Document saves use a flushed same-directory temporary file followed by an
+atomic replacement, and concurrent saves to one path are serialized. Desktop
+crash recovery uses the same durable write path in the application's private
+data directory. File byte limits and document-complexity budgets are enforced
+before untrusted projects are hydrated and rendered.
+
+The macOS package also removes unused capture-capability declarations and
+disables App Transport Security network allowances before signing.
+
 Project files are untrusted input. Parser and file-access boundary tests run on
 every supported operating system, while CodeQL and dependency automation watch
 the source and locked development toolchain.
 
 ## Release authenticity
 
-Version 1.0 builds are not signed with paid Apple Developer ID or Windows
+Current builds are not signed with paid Apple Developer ID or Windows
 publisher certificates. macOS and Windows therefore show a first-launch
 warning. This is an identity limitation, not a claim that warnings should be
 ignored generally. Prefer downloads from this repository's Releases page and
-compare them with the published `SHA256SUMS.txt` file. Build from the tagged
-source if you require an independently inspectable chain of custody.
+compare them with the published `SHA256SUMS.txt` file. GitHub's release
+workflow also creates signed Sigstore/SLSA build-provenance attestations;
+verify a download with `gh attestation verify FILE --repo argocine/Scriptum`.
+Build from the tagged source if you require an independently inspectable chain
+of custody.

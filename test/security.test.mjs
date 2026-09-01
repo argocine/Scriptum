@@ -6,6 +6,7 @@ import path from 'node:path';
 const require = createRequire(import.meta.url);
 const { createFileAccess } = require('../electron/file-access.cjs');
 const { isAllowedExternalUrl } = require('../electron/navigation-policy.cjs');
+const { hardenInfo } = require('../build/after-pack.cjs');
 
 let pass = 0;
 function t(name, fn) {
@@ -72,6 +73,22 @@ t('the renderer sandbox, permission denial, and network blocks stay enabled', ()
   assert.match(main, /setPermissionRequestHandler[\s\S]*callback\(false\)/);
   assert.match(main, /setPermissionCheckHandler\(\(\) => false\)/);
   assert.match(html, /connect-src 'none'/);
+});
+
+t('the macOS package declares no unused capture capability or network allowance', () => {
+  const info = hardenInfo({
+    NSCameraUsageDescription: 'camera',
+    NSMicrophoneUsageDescription: 'microphone',
+    NSAudioCaptureUsageDescription: 'audio',
+    NSBluetoothAlwaysUsageDescription: 'bluetooth',
+    NSBluetoothPeripheralUsageDescription: 'bluetooth',
+    NSAppTransportSecurity: { NSAllowsArbitraryLoads: true },
+  });
+  assert.ok(!Object.keys(info).some((key) => /UsageDescription$/.test(key)));
+  assert.deepEqual(info.NSAppTransportSecurity, {
+    NSAllowsArbitraryLoads: false,
+    NSAllowsLocalNetworking: false,
+  });
 });
 
 console.log(`\n${pass} security checks passed.`);

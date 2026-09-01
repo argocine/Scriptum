@@ -240,11 +240,17 @@
   top: 1px;
   width: 12px;
   height: 12px;
+  padding: 0;
+  border: 0;
   border-radius: 3px;
   background: var(--note-color, #f2c94c);
   cursor: pointer;
   user-select: none;
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+.note-flag:focus-visible {
+  outline: 2px solid var(--accent, #4c72d6);
+  outline-offset: 2px;
 }
 
 .alt-controls {

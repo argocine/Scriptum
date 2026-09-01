@@ -10,8 +10,10 @@ const { app, BrowserWindow, Menu, dialog, ipcMain, shell, protocol, net } = requ
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { pathToFileURL } = require('node:url');
+const { enqueueAtomicWrite } = require('./atomic-write.cjs');
 const { createFileAccess } = require('./file-access.cjs');
 const { isAllowedExternalUrl } = require('./navigation-policy.cjs');
+const { openPathFromArguments } = require('./open-path.cjs');
 
 // Scriptum is an offline application. Disable Chromium background services
 // before the browser process starts; a session-level request guard below is
@@ -21,11 +23,18 @@ app.commandLine.appendSwitch('disable-background-networking');
 const ROOT = path.join(__dirname, '..');
 const SRC = path.join(ROOT, 'src');
 const isDev = process.argv.includes('--dev');
+const MAX_IMPORT_BYTES = 96 * 1024 * 1024;
+const MAX_WRITE_BYTES = 128 * 1024 * 1024;
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) app.quit();
 
 let mainWindow = null;
 let pendingOpenPath = null; // a file double-clicked before the window existed
+let rendererReady = false;
 const fileAccess = createFileAccess();
 let pdfPrintInFlight = false;
+let pendingFileWrites = 0;
 
 /**
  * Quit bookkeeping.
@@ -49,8 +58,8 @@ let closeFailsafe = null;
 function armCloseFailsafe() {
   clearTimeout(closeFailsafe);
   closeFailsafe = setTimeout(() => {
-    if (dialogDepth > 0) {
-      armCloseFailsafe(); // a prompt is open; the user is still deciding
+    if (dialogDepth > 0 || pendingFileWrites > 0) {
+      armCloseFailsafe(); // a prompt or durable file write is still in progress
       return;
     }
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -75,6 +84,45 @@ async function withDialog(fn) {
   } finally {
     dialogDepth -= 1;
   }
+}
+
+async function withFileWrite(fn) {
+  pendingFileWrites += 1;
+  try {
+    return await fn();
+  } finally {
+    pendingFileWrites -= 1;
+  }
+}
+
+async function readLimitedUtf8(filePath) {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    const stat = await handle.stat();
+    if (!stat.isFile()) throw new Error('The selected path is not a regular file.');
+    if (stat.size > MAX_IMPORT_BYTES) {
+      throw new Error('That file is too large for Scriptum to open safely (96 MiB maximum).');
+    }
+    return await handle.readFile('utf8');
+  } finally {
+    await handle.close();
+  }
+}
+
+function checkedText(data) {
+  if (typeof data !== 'string') throw new Error('Refused non-text document data.');
+  if (Buffer.byteLength(data, 'utf8') > MAX_WRITE_BYTES) {
+    throw new Error('That document is too large for Scriptum to save safely.');
+  }
+  return data;
+}
+
+function checkedBytes(data) {
+  const bytes = Buffer.from(data);
+  if (bytes.byteLength > MAX_WRITE_BYTES) {
+    throw new Error('That export is too large for Scriptum to save safely.');
+  }
+  return bytes;
 }
 
 /* ------------------------------------------------------------------ *
@@ -117,7 +165,7 @@ function createWindow() {
     height: 900,
     minWidth: 900,
     minHeight: 600,
-    titleBarStyle: 'hiddenInset',
+    ...(process.platform === 'darwin' ? { titleBarStyle: 'hiddenInset' } : {}),
     backgroundColor: '#d7dade',
     show: false,
     webPreferences: {
@@ -130,6 +178,7 @@ function createWindow() {
       spellcheck: process.platform === 'darwin',
     },
   });
+  rendererReady = false;
 
   // No page inside Scriptum may make an HTTP(S) request. This blocks data
   // exfiltration even if future UI code accidentally introduces a fetch or a
@@ -157,12 +206,17 @@ function createWindow() {
     );
   }
 
+  mainWindow.webContents.once('did-finish-load', () => {
+    rendererReady = true;
+    if (pendingOpenPath) {
+      const candidate = pendingOpenPath;
+      pendingOpenPath = null;
+      sendOpenPath(candidate);
+    }
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    if (pendingOpenPath) {
-      sendOpenPath(pendingOpenPath);
-      pendingOpenPath = null;
-    }
     if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
   });
 
@@ -179,6 +233,7 @@ function createWindow() {
   });
 
   mainWindow.on('closed', () => {
+    rendererReady = false;
     mainWindow = null;
   });
 
@@ -224,6 +279,14 @@ function sendOpenPath(candidate) {
     write: path.extname(candidate).toLowerCase() === '.scriptum',
   });
   send('menu:open-path', filePath);
+}
+
+function queueOpenPath(candidate) {
+  const filePath = openPathFromArguments([candidate]);
+  if (!filePath) return false;
+  if (mainWindow && rendererReady) sendOpenPath(filePath);
+  else pendingOpenPath = filePath;
+  return true;
 }
 
 function requireTrustedSender(event) {
@@ -348,6 +411,9 @@ function buildMenu() {
         { type: 'separator' },
         cmd('Dual Dialogue', 'CmdOrCtrl+Alt+D', 'menu:dual'),
         cmd('Add Alternate Dialogue', 'CmdOrCtrl+Alt+L', 'menu:add-alternate'),
+        cmd('Previous Alternate Dialogue', 'CmdOrCtrl+Alt+Left', 'menu:previous-alternate'),
+        cmd('Next Alternate Dialogue', 'CmdOrCtrl+Alt+Right', 'menu:next-alternate'),
+        cmd('Remove Alternate Dialogue', 'CmdOrCtrl+Alt+Backspace', 'menu:remove-alternate'),
         cmd('Format Assistant…', null, 'menu:format-assistant'),
         cmd('Element Settings…', null, 'menu:element-settings'),
         cmd('Page Setup…', null, 'menu:page-setup'),
@@ -400,6 +466,7 @@ function buildMenu() {
     {
       role: 'help',
       submenu: [
+        ...(!isMac ? [{ role: 'about' }, { type: 'separator' }] : []),
         cmd('Keyboard Shortcuts', null, 'menu:shortcuts'),
         cmd('Privacy & Local Data', null, 'menu:privacy'),
         {
@@ -443,7 +510,7 @@ ipcMain.handle('dialog:open', async (event, kinds = ['scriptum', 'fdx', 'fountai
       read: true,
       write: path.extname(selected).toLowerCase() === '.scriptum',
     });
-    const data = await fs.readFile(filePath, 'utf8');
+    const data = await readLimitedUtf8(filePath);
     return { path: filePath, data };
   })
 );
@@ -461,18 +528,49 @@ ipcMain.handle('dialog:save', async (event, { defaultName, kind = 'scriptum' }) 
 
 ipcMain.handle('file:read', async (event, filePath) => {
   requireTrustedSender(event);
-  return fs.readFile(requireFileGrant(filePath, 'read'), 'utf8');
+  return readLimitedUtf8(requireFileGrant(filePath, 'read'));
 });
 
 ipcMain.handle('file:write', async (event, { path: filePath, data }) => {
   requireTrustedSender(event);
-  await fs.writeFile(requireFileGrant(filePath, 'write'), data, 'utf8');
+  const target = requireFileGrant(filePath, 'write');
+  await withFileWrite(() => enqueueAtomicWrite(target, checkedText(data), { encoding: 'utf8' }));
   return true;
 });
 
 ipcMain.handle('file:write-binary', async (event, { path: filePath, data }) => {
   requireTrustedSender(event);
-  await fs.writeFile(requireFileGrant(filePath, 'write'), Buffer.from(data));
+  const target = requireFileGrant(filePath, 'write');
+  await withFileWrite(() => enqueueAtomicWrite(target, checkedBytes(data)));
+  return true;
+});
+
+ipcMain.handle('recovery:read', async (event) => {
+  requireTrustedSender(event);
+  const recoveryPath = path.join(app.getPath('userData'), 'recovery.json');
+  try {
+    return await readLimitedUtf8(recoveryPath);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+});
+
+ipcMain.handle('recovery:write', async (event, data) => {
+  requireTrustedSender(event);
+  const recoveryPath = path.join(app.getPath('userData'), 'recovery.json');
+  await withFileWrite(() =>
+    enqueueAtomicWrite(recoveryPath, checkedText(data), { encoding: 'utf8' })
+  );
+  return true;
+});
+
+ipcMain.handle('recovery:clear', async (event) => {
+  requireTrustedSender(event);
+  const recoveryPath = path.join(app.getPath('userData'), 'recovery.json');
+  await fs.unlink(recoveryPath).catch((error) => {
+    if (error?.code !== 'ENOENT') throw error;
+  });
   return true;
 });
 
@@ -573,13 +671,24 @@ ipcMain.handle('window:close', (event, { confirmed = true } = {}) => {
  * ------------------------------------------------------------------ */
 
 app.whenReady().then(() => {
+  if (!hasSingleInstanceLock) return;
   registerProtocol();
   buildMenu();
+  pendingOpenPath ||= openPathFromArguments(process.argv.slice(1));
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('second-instance', (_event, argv) => {
+  queueOpenPath(openPathFromArguments(argv));
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  }
 });
 
 // Remember that a quit is in flight before any window veto can cancel it.
@@ -599,8 +708,7 @@ if (process.env.SCRIPTUM_TEST_QUIT) {
 
 app.on('open-file', (event, filePath) => {
   event.preventDefault();
-  if (mainWindow) sendOpenPath(filePath);
-  else pendingOpenPath = filePath;
+  queueOpenPath(filePath);
 });
 
 app.on('window-all-closed', () => {

@@ -1151,6 +1151,7 @@ export class ScriptEditor {
     // Space, and arrow-key behavior remain native instead of treating them as
     // screenplay-editing commands.
     if (e.target.closest?.('.alt-controls')) return;
+    if (e.target.closest?.('.note-flag')) return;
     const focusedTag = e.target.closest?.('.production-tag');
     if (focusedTag && document.activeElement === focusedTag) {
       if (e.key === 'Tab') return;
@@ -1206,7 +1207,19 @@ export class ScriptEditor {
     }
 
     if (e.key === 'Escape') {
-      this.closeAutocomplete();
+      if (this.ac.open) {
+        this.closeAutocomplete();
+        return;
+      }
+      e.preventDefault();
+      const caret = this.getCaret();
+      const inline = caret
+        ? this.container.querySelector(`.alt-button[data-element-id="${cssEscape(caret.elementId)}"]`)
+        : null;
+      const toolbar = [...document.querySelectorAll(
+        '#toolbar button:not([hidden]), #toolbar select:not([hidden])'
+      )].find((control) => control.getClientRects().length);
+      (inline || toolbar)?.focus();
       return;
     }
 
