@@ -3,12 +3,12 @@
  *
  * This module deliberately avoids spelling, grammar, taste, and stylistic
  * opinion. It reports only document structures that are empty, internally
- * inconsistent, or unable to survive the current PDF encoder.
+ * inconsistent, or unable to survive local PDF printing.
  */
 
 import { ElementType, ELEMENT_LABEL } from '../core/format.js';
 import { getScenes } from '../core/model.js';
-import { unsupportedPdfCharacters } from '../core/pdf-encoding.js';
+import { invalidPrintCharacters } from '../core/unicode.js';
 import { hasAlternateDialogue } from '../core/alternates.js';
 
 const SPEECH = new Set([
@@ -72,7 +72,7 @@ export function auditDocument(doc, pagination = null) {
 }
 
 export function pdfSupportIssues(doc, pagination = null) {
-  return auditDocument(doc, pagination).filter((issue) => issue.code === 'unsupported-pdf-text');
+  return auditDocument(doc, pagination).filter((issue) => issue.code === 'invalid-print-text');
 }
 
 function auditEmptyElements(elements, add) {
@@ -254,62 +254,43 @@ function auditAlternates(elements, add) {
 function auditPdfSupport(doc, elements, pagination, add) {
   const title = doc?.title || {};
   const titleFields = title.showTitlePage === false
-    ? ['title', 'author']
+    ? ['title']
     : ['title', 'credit', 'author', 'source', 'contact', 'draftDate'];
   for (const field of titleFields) {
-    const printed = field === 'title' && title.showTitlePage !== false
-      ? String(title[field] || '').toUpperCase()
-      : title[field];
-    const unsupported = unsupportedPdfCharacters(printed);
+    const unsupported = invalidPrintCharacters(title[field]);
     if (!unsupported.length) continue;
     add(
-      'unsupported-pdf-text',
+      'invalid-print-text',
       'warning',
-      `${titleFieldLabel(field)} contains ${quantity(unsupported.length, 'character')} the current PDF font cannot print.`,
+      `${titleFieldLabel(field)} contains ${quantity(unsupported.length, 'invalid Unicode character')} that may not print.`,
       null,
       { field: `title.${field}`, range: firstRange(unsupported), count: unsupported.length }
     );
   }
 
-  // Inspect the exact post-case, post-wrap strings consumed by PDF export.
-  // This catches transformations such as `µ` -> `Μ` and combining marks that
-  // land on a separate hard-wrapped line.
-  const printedLines = new Map();
-  for (const page of pagination?.pages || []) {
-    for (const line of page.lines || []) {
-      if (!line.elementId || typeof line.text !== 'string') continue;
-      if (!printedLines.has(line.elementId)) printedLines.set(line.elementId, []);
-      printedLines.get(line.elementId).push(line);
-    }
-  }
-
   for (const element of elements) {
-    const lines = printedLines.get(element.id);
-    const unsupported = lines?.length
-      ? lines.flatMap((line) =>
-          unsupportedPdfCharacters(line.text).map((range) => ({
-            ...range,
-            start: (line.charStart || 0) + range.start,
-            end: (line.charStart || 0) + range.end,
-          })))
-      : unsupportedPdfCharacters(element.text);
+    const unsupported = invalidPrintCharacters(element.text);
     if (unsupported.length) {
       add(
-        'unsupported-pdf-text',
+        'invalid-print-text',
         'warning',
-        `Element contains ${quantity(unsupported.length, 'character')} the current PDF font cannot print.`,
+        `Element contains ${quantity(unsupported.length, 'invalid Unicode character')} that may not print.`,
         element,
         { range: firstRange(unsupported), count: unsupported.length }
       );
     }
 
-    if (element.type === ElementType.SCENE_HEADING && element.sceneNumber) {
-      const sceneNumberUnsupported = unsupportedPdfCharacters(element.sceneNumber);
+    if (
+      element.type === ElementType.SCENE_HEADING &&
+      element.sceneNumber &&
+      (doc.sceneNumbering?.showLeft || doc.sceneNumbering?.showRight)
+    ) {
+      const sceneNumberUnsupported = invalidPrintCharacters(element.sceneNumber);
       if (sceneNumberUnsupported.length) {
         add(
-          'unsupported-pdf-text',
+          'invalid-print-text',
           'warning',
-          `Scene number contains ${quantity(sceneNumberUnsupported.length, 'character')} the current PDF font cannot print.`,
+          `Scene number contains ${quantity(sceneNumberUnsupported.length, 'invalid Unicode character')} that may not print.`,
           element,
           { field: 'sceneNumber', count: sceneNumberUnsupported.length }
         );
@@ -317,16 +298,18 @@ function auditPdfSupport(doc, elements, pagination, add) {
     }
   }
 
-  const usedRevisionIds = new Set(elements.map((element) => element.revisionId).filter(Boolean));
+  const usedRevisionIds = doc?.revisions?.showMarks
+    ? new Set(elements.map((element) => element.revisionId).filter(Boolean))
+    : new Set();
   const revisionSets = Array.isArray(doc?.revisions?.sets) ? doc.revisions.sets : [];
   for (const set of revisionSets) {
     if (set.active === false || !usedRevisionIds.has(set.id)) continue;
-    const unsupported = unsupportedPdfCharacters(set.mark);
+    const unsupported = invalidPrintCharacters(set.mark);
     if (!unsupported.length) continue;
     add(
-      'unsupported-pdf-text',
+      'invalid-print-text',
       'warning',
-      `Revision mark contains ${quantity(unsupported.length, 'character')} the current PDF font cannot print.`,
+      `Revision mark contains ${quantity(unsupported.length, 'invalid Unicode character')} that may not print.`,
       null,
       { field: `revisions.${set.id}.mark`, count: unsupported.length }
     );
@@ -335,12 +318,12 @@ function auditPdfSupport(doc, elements, pagination, add) {
   const currentRevision = revisionSets.find((set) => set.id === doc?.revisions?.current);
   if (currentRevision) {
     for (const field of ['name', 'date']) {
-      const unsupported = unsupportedPdfCharacters(currentRevision[field]);
+      const unsupported = invalidPrintCharacters(currentRevision[field]);
       if (!unsupported.length) continue;
       add(
-        'unsupported-pdf-text',
+        'invalid-print-text',
         'warning',
-        `Revision ${field} contains ${quantity(unsupported.length, 'character')} the current PDF font cannot print.`,
+        `Revision ${field} contains ${quantity(unsupported.length, 'invalid Unicode character')} that may not print.`,
         null,
         { field: `revisions.${currentRevision.id}.${field}`, count: unsupported.length }
       );

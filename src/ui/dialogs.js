@@ -1137,7 +1137,7 @@ export function formatAssistantDialog(editor, { onGoTo } = {}) {
   const summary = issues.length
     ? `${issues.length} ${issues.length === 1 ? 'item' : 'items'} found: ` +
       `${counts.error} errors, ${counts.warning} warnings, ${counts.info} information.`
-    : 'No structural or PDF compatibility problems found.';
+    : 'No structural or print compatibility problems found.';
 
   const body = h(
     'div',
@@ -1146,7 +1146,7 @@ export function formatAssistantDialog(editor, { onGoTo } = {}) {
     h(
       'p',
       { class: 'hint' },
-      'Format Assistant checks document structure and PDF character support. It does not judge spelling, grammar, or writing style.'
+      'Format Assistant checks document structure and valid printable text. It does not judge spelling, grammar, or writing style.'
     )
   );
 

@@ -8,6 +8,8 @@
  * what makes the on-screen page count identical to the exported PDF's.
  */
 
+import { uppercasePreservingOffsets } from './unicode.js';
+
 export const CPI = 10; // Courier 12pt: characters per inch
 export const LPI = 6; // lines per inch (12pt single-spaced)
 export const PT_PER_INCH = 72;
@@ -310,7 +312,7 @@ function clampNumber(value, lo, hi, fallback) {
 
 /** Apply an element's case rule to text for display and print. */
 export function applyCase(text, spec) {
-  if (spec.case === 'upper') return text.toUpperCase();
+  if (spec.case === 'upper') return uppercasePreservingOffsets(text);
   return text;
 }
 

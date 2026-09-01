@@ -55,7 +55,7 @@
         <div class="tb-group">
           <button class="btn" id="tb-revision" title="Revision sets">Revisions</button>
           <button class="btn" id="tb-revision-room" title="Named snapshots and comparisons">Room</button>
-          <button class="btn" id="tb-format-assistant" title="Check screenplay structure and PDF compatibility" aria-label="Format Assistant">Check</button>
+          <button class="btn" id="tb-format-assistant" title="Check screenplay structure and printable text" aria-label="Format Assistant">Check</button>
           <button class="btn" id="tb-reports" title="Reports">Reports</button>
           <button class="btn" id="tb-table-read" title="Read the screenplay aloud with on-device voices">Read</button>
           <button class="btn" id="tb-title" title="Title page">Title Page</button>
@@ -166,6 +166,8 @@
         </label>
       </div>
     </div>
+
+    <main id="pdf-print-root" aria-hidden="true"></main>
 
     <div class="overlay hidden" id="overlay">
       <div class="dialog" id="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1">

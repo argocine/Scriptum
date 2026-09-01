@@ -25,6 +25,7 @@ const isDev = process.argv.includes('--dev');
 let mainWindow = null;
 let pendingOpenPath = null; // a file double-clicked before the window existed
 const fileAccess = createFileAccess();
+let pdfPrintInFlight = false;
 
 /**
  * Quit bookkeeping.
@@ -473,6 +474,35 @@ ipcMain.handle('file:write-binary', async (event, { path: filePath, data }) => {
   requireTrustedSender(event);
   await fs.writeFile(requireFileGrant(filePath, 'write'), Buffer.from(data));
   return true;
+});
+
+ipcMain.handle('document:print-pdf', async (event, { width, height } = {}) => {
+  requireTrustedSender(event);
+  const paperWidth = Number(width);
+  const paperHeight = Number(height);
+  if (
+    !Number.isFinite(paperWidth) || !Number.isFinite(paperHeight) ||
+    paperWidth < 4 || paperWidth > 20 || paperHeight < 4 || paperHeight > 20
+  ) {
+    throw new Error('Refused invalid PDF page dimensions.');
+  }
+  if (pdfPrintInFlight) throw new Error('A PDF export is already in progress.');
+
+  pdfPrintInFlight = true;
+  try {
+    // Chromium shapes Unicode using local system fonts and embeds the glyphs
+    // it uses. No document text or font request leaves this WebContents.
+    return await event.sender.printToPDF({
+      pageSize: { width: paperWidth, height: paperHeight },
+      margins: { top: 0, right: 0, bottom: 0, left: 0 },
+      displayHeaderFooter: false,
+      preferCSSPageSize: true,
+      printBackground: true,
+      generateTaggedPDF: true,
+    });
+  } finally {
+    pdfPrintInFlight = false;
+  }
 });
 
 ipcMain.handle('shell:show', async (event, filePath) => {

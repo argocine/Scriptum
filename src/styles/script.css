@@ -2,10 +2,9 @@
  * script.css — Page and element geometry.
  *
  * Courier at 16px has an advance width of exactly 9.6px, which at 96dpi is
- * 10 characters per inch — identical to the PDF standard Courier used on
- * export. Line height is 16px = 6 lines per inch. Because the metrics match
- * the paginator's character arithmetic exactly, the browser's own line
- * breaking lands on the same words the printed page will.
+ * 10 characters per inch. Line height is 16px = 6 lines per inch. Unicode
+ * fallback fonts use the same one-cell/two-cell arithmetic as the paginator,
+ * so the page model remains stable when a script contains non-Latin text.
  */
 
 :root {
@@ -375,33 +374,66 @@
 }
 
 /* ------------------------------------------------------------------ *
- * Print — used by the browser-print fallback path
+ * Unicode PDF / browser print surface
  * ------------------------------------------------------------------ */
 
+#pdf-print-root {
+  display: none;
+}
+
+.pdf-print-page {
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  color: #000;
+  break-after: page;
+  page-break-after: always;
+  font-family:
+    'Courier Prime', 'Courier New', 'Nimbus Mono PS', 'Liberation Mono',
+    'Noto Sans Mono CJK SC', 'Noto Sans Mono', 'SFMono-Regular',
+    'PingFang SC', 'Hiragino Sans', 'Yu Gothic', 'Malgun Gothic',
+    'Noto Naskh Arabic', 'Geeza Pro', 'Arial Hebrew',
+    'Apple Color Emoji', 'Segoe UI Emoji', monospace;
+  font-size: 12pt;
+  line-height: 12pt;
+}
+
+.pdf-print-page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+
+.pdf-print-line {
+  position: absolute;
+  height: 12pt;
+  margin: 0;
+  padding: 0;
+  white-space: pre;
+  unicode-bidi: plaintext;
+  color: #000;
+}
+
 @media print {
-  #script-scroll {
-    padding: 0;
-    overflow: visible;
-  }
-  .page {
-    box-shadow: none;
-    margin: 0;
-    break-after: page;
-    border-radius: 0;
-  }
-  .page-tab,
-  .note-flag,
-  .alt-controls,
-  .production-tag,
-  .el.scene-active::before {
-    box-shadow: none !important;
-    background: transparent !important;
+  html,
+  body {
+    width: auto;
+    height: auto;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
   }
 
-  .page-tab,
-  .note-flag,
-  .alt-controls,
-  .el.scene-active::before {
+  body > #app,
+  body > #overlay,
+  body > #toast {
     display: none !important;
+  }
+
+  #pdf-print-root {
+    display: block !important;
+    margin: 0;
+    padding: 0;
   }
 }

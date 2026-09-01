@@ -9,6 +9,7 @@ import {
   sanitizePdfText,
   unsupportedPdfCharacters,
 } from '../src/core/pdf-encoding.js';
+import { invalidPrintCharacters } from '../src/core/unicode.js';
 
 let pass = 0;
 function t(name, fn) {
@@ -120,45 +121,45 @@ t('C0, C1, and DEL controls are not treated as printable WinAnsi text', () => {
   assert.deepEqual([...encodeWinAnsi('\u0001\u007f\u0080')], [63, 63, 63]);
 });
 
-t('preflight checks post-case and post-wrap text actually sent to PDF', () => {
-  const uppercased = createDocument({
-    elements: [createElement(ElementType.SCENE_HEADING, 'INT. Mµ - DAY')],
+t('Unicode scripts, symbols, and emoji pass the print preflight', () => {
+  const doc = createDocument({
+    elements: [
+      createElement(ElementType.SCENE_HEADING, 'INT. CAFÉ 東京 - NOCHE'),
+      createElement(ElementType.ACTION, 'Zoë meets 猫. مرحبا שלום 😀'),
+    ],
   });
-  assert.ok(pdfSupportIssues(uppercased, paginate(uppercased, styles)).length > 0);
-
-  const splitAccent = createDocument({
-    elements: [createElement(ElementType.ACTION, `${'A'.repeat(59)}e\u0308`)],
-  });
-  assert.ok(pdfSupportIssues(splitAccent, paginate(splitAccent, styles)).length > 0);
+  doc.title.title = '星の旅 🚀';
+  assert.deepEqual(pdfSupportIssues(doc, paginate(doc, styles)), []);
 });
 
-t('unsupported PDF characters retain exact source offsets', () => {
-  const text = 'A 😀 then 猫';
-  const unsupported = unsupportedPdfCharacters(text);
+t('invalid printable text retains exact UTF-16 source offsets', () => {
+  const text = 'A\u0001B\ud800C\ufdd0';
+  const unsupported = invalidPrintCharacters(text);
   assert.deepEqual(
     unsupported.map(({ start, end, source }) => ({ start, end, source })),
     [
-      { start: 2, end: 4, source: '😀' },
-      { start: 10, end: 11, source: '猫' },
+      { start: 1, end: 2, source: '\u0001' },
+      { start: 3, end: 4, source: '\ud800' },
+      { start: 5, end: 6, source: '\ufdd0' },
     ]
   );
 });
 
-t('PDF issues cover title fields and screenplay elements', () => {
-  const element = createElement(ElementType.ACTION, 'The 🚀 launches.');
+t('print issues cover title fields and screenplay elements', () => {
+  const element = createElement(ElementType.ACTION, 'The\u0001 launch.');
   const doc = createDocument({ elements: [element] });
-  doc.title.title = '星';
+  doc.title.title = 'Draft\u007f';
   const issues = pdfSupportIssues(doc, paginate(doc, styles));
   assert.equal(issues.length, 2);
   assert.ok(issues.some((issue) => issue.field === 'title.title' && !issue.elementId));
   const body = issues.find((issue) => issue.elementId === element.id);
-  assert.deepEqual(body.range, { start: 4, end: 6 });
+  assert.deepEqual(body.range, { start: 3, end: 4 });
   assert.equal(body.page, '1');
 });
 
-t('PDF preflight covers printed scene numbers and revision furniture', () => {
+t('print preflight covers visible scene numbers and revision furniture', () => {
   const scene = createElement(ElementType.SCENE_HEADING, 'INT. ROOM - DAY', {
-    sceneNumber: '猫',
+    sceneNumber: '1\u0001',
     sceneNumberLocked: true,
     revisionId: 'r1',
   });
@@ -167,7 +168,7 @@ t('PDF preflight covers printed scene numbers and revision furniture', () => {
   doc.sceneNumbering.locked = true;
   doc.revisions.current = 'r1';
   doc.revisions.sets = [
-    { id: 'r1', name: 'Blue 🚀', color: '#7fb2ff', mark: '★', date: '', active: true },
+    { id: 'r1', name: 'Blue\u0002', color: '#7fb2ff', mark: '*\u0003', date: '', active: true },
   ];
   const issues = pdfSupportIssues(doc, paginate(doc, styles));
   assert.ok(issues.some((issue) => issue.field === 'sceneNumber'));
@@ -197,15 +198,15 @@ t('all duplicate scene-number participants are reported', () => {
   assert.equal(audit(doc).filter((issue) => issue.code === 'duplicate-scene-number').length, 2);
 });
 
-t('hidden title pages still preflight title and author PDF metadata', () => {
+t('hidden title pages preflight only the title used as PDF metadata', () => {
   const doc = createDocument({ elements: [createElement(ElementType.ACTION, 'A clean page.')] });
   doc.title.showTitlePage = false;
-  doc.title.title = '星';
-  doc.title.author = 'Writer 🚀';
-  doc.title.contact = 'Hidden 🚀';
+  doc.title.title = 'Draft\u0001';
+  doc.title.author = 'Writer\u0002';
+  doc.title.contact = 'Hidden\u0003';
   const fields = pdfSupportIssues(doc, paginate(doc, styles)).map((issue) => issue.field);
   assert.ok(fields.includes('title.title'));
-  assert.ok(fields.includes('title.author'));
+  assert.ok(!fields.includes('title.author'));
   assert.ok(!fields.includes('title.contact'));
 });
 

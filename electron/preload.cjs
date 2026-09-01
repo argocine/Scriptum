@@ -86,6 +86,7 @@ contextBridge.exposeInMainWorld('scriptum', {
   readFile: (path) => ipcRenderer.invoke('file:read', path),
   writeFile: (path, data) => ipcRenderer.invoke('file:write', { path, data }),
   writeBinary: (path, data) => ipcRenderer.invoke('file:write-binary', { path, data }),
+  printToPDF: (pageSize) => ipcRenderer.invoke('document:print-pdf', pageSize),
   showInFolder: (path) => ipcRenderer.invoke('shell:show', path),
 
   confirm: (opts) => ipcRenderer.invoke('dialog:confirm', opts),

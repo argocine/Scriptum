@@ -1,12 +1,12 @@
 /**
- * pdf.js — A minimal PDF 1.4 writer, written from scratch.
+ * pdf.js — Scriptum's deterministic, classic PDF 1.4 writer.
  *
- * There is no dependency and no embedded font file because Courier,
+ * The desktop and browser apps use print-view.js for Unicode-capable output.
+ * This small writer remains a dependency-free geometry/encoding oracle for
+ * deterministic tests and compatibility work. Courier,
  * Courier-Bold, Courier-Oblique and Courier-BoldOblique are among the fourteen
  * fonts every PDF reader is required to provide. Their metrics (0.6 em advance)
- * are exactly the 10 characters per inch the paginator assumes, so the exported
- * page is character-for-character identical to what is on screen — and the file
- * carries no font licensing baggage.
+ * are exactly the 10 characters per inch the paginator assumes.
  */
 
 import { ElementType, applyCase } from '../core/format.js';

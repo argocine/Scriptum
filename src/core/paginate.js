@@ -22,6 +22,7 @@ import {
   charsBetween,
 } from './format.js';
 import { baseCharacterName, characterExtension } from './model.js';
+import { textClusters } from './unicode.js';
 
 const SPLITTABLE = new Set([
   ElementType.ACTION,
@@ -41,23 +42,48 @@ export function wrapText(text, width) {
   if (!text) return [{ text: '', start: 0, end: 0 }];
 
   const lines = [];
+  const clusters = textClusters(text);
+  const limit = Math.max(1, Math.floor(Number(width) || 1));
   let i = 0;
-  const n = text.length;
+  let clusterIndex = 0;
 
-  while (i < n) {
-    // Consume up to `width` characters, then walk back to a space.
-    let end = Math.min(i + width, n);
+  while (clusterIndex < clusters.length) {
+    const lineStartIndex = clusterIndex;
+    let cells = 0;
+    let end = i;
 
-    if (end < n) {
-      let brk = -1;
-      for (let j = end; j > i; j -= 1) {
-        if (text[j] === ' ' || text[j] === '\t') {
-          brk = j;
+    while (clusterIndex < clusters.length) {
+      const cluster = clusters[clusterIndex];
+      if (cells > 0 && cells + cluster.cells > limit) break;
+      cells += cluster.cells;
+      end = cluster.end;
+      clusterIndex += 1;
+      if (cells >= limit) break;
+    }
+
+    // A pathological zero-width cluster must still make forward progress.
+    if (clusterIndex === lineStartIndex) {
+      end = clusters[clusterIndex].end;
+      clusterIndex += 1;
+    }
+
+    if (clusterIndex < clusters.length) {
+      let breakIndex = -1;
+      for (let j = clusterIndex; j > lineStartIndex; j -= 1) {
+        const at = j < clusters.length ? clusters[j].text : '';
+        const before = clusters[j - 1].text;
+        if (at === ' ' || at === '\t') {
+          breakIndex = j;
+          end = clusters[j].start;
+          break;
+        }
+        if (before === ' ' || before === '\t') {
+          breakIndex = j - 1;
+          end = clusters[j - 1].start;
           break;
         }
       }
-      // A single word longer than the line gets hard-broken.
-      if (brk > i) end = brk;
+      if (breakIndex > lineStartIndex) clusterIndex = breakIndex;
     }
 
     lines.push({
@@ -68,7 +94,12 @@ export function wrapText(text, width) {
 
     // Skip the space we broke on.
     i = end;
-    while (i < n && (text[i] === ' ' || text[i] === '\t')) i += 1;
+    while (clusterIndex < clusters.length) {
+      const cluster = clusters[clusterIndex];
+      if (cluster.text !== ' ' && cluster.text !== '\t') break;
+      i = cluster.end;
+      clusterIndex += 1;
+    }
   }
 
   return lines.length ? lines : [{ text: '', start: 0, end: 0 }];

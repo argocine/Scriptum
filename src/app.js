@@ -17,7 +17,7 @@ import { WritingSprint, formatSprintTime } from './features/sprint.js';
 import { Finder } from './features/find.js';
 import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
-import { exportPDF } from './io/pdf.js';
+import { mountPrintView } from './io/print-view.js';
 import { pdfSupportIssues } from './features/format-assistant.js';
 import { documentHasAlternates, hasAlternateDialogue } from './core/alternates.js';
 import { documentHasProductionTags } from './core/production.js';
@@ -775,30 +775,68 @@ async function exportInterchangeWithAlternates(kind, buildText) {
   await exportText(buildText(), kind);
 }
 
+let pdfExportInFlight = false;
+
 async function exportPdf() {
+  if (pdfExportInFlight) {
+    toast('PDF export is already in progress.');
+    return;
+  }
+  pdfExportInFlight = true;
+  const exportButton = document.getElementById('tb-pdf');
+  if (exportButton) exportButton.disabled = true;
   try {
     const unsupported = pdfSupportIssues(editor.doc, editor.pagination);
     if (unsupported.length) {
       const characterCount = unsupported.reduce((total, issue) => total + issue.count, 0);
       const choice = await platform.confirm({
-        message: 'Some characters cannot be printed by the current PDF font.',
+        message: 'Some text contains invalid Unicode characters.',
         detail:
           `${characterCount} ${characterCount === 1 ? 'character' : 'characters'} in ` +
-          `${unsupported.length} ${unsupported.length === 1 ? 'place will' : 'places will'} ` +
-          'appear as ?. Format Assistant can take you to each affected screenplay element.',
+          `${unsupported.length} ${unsupported.length === 1 ? 'place may' : 'places may'} ` +
+          'not print. Format Assistant can take you to each affected screenplay element.',
         buttons: ['Export Anyway', 'Cancel'],
         defaultId: 1,
       });
       if (choice !== 0) return;
     }
-    const bytes = exportPDF(editor.doc, editor.pagination, editor.styles);
-    const path = await platform.saveBinary(bytes, {
-      defaultName: suggestedName('pdf'),
-      kind: 'pdf',
-    });
-    if (path) toast(`Exported ${editor.pagination.totalPages} pages to ${baseName(path)}.`);
+
+    const print = mountPrintView(
+      document.getElementById('pdf-print-root'),
+      editor.doc,
+      editor.pagination,
+      editor.styles
+    );
+
+    try {
+      await print.ready;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      if (!native) {
+        window.print();
+        toast('Use the browser print dialog to save the screenplay as PDF.');
+        return;
+      }
+
+      const bytes = await native.printToPDF({
+        width: print.model.width,
+        height: print.model.height,
+      });
+      const path = await platform.saveBinary(bytes, {
+        defaultName: suggestedName('pdf'),
+        kind: 'pdf',
+      });
+      if (path) {
+        toast(`Exported ${print.model.pages.length} pages to ${baseName(path)}.`);
+      }
+    } finally {
+      print.cleanup();
+    }
   } catch (err) {
     platform.error({ message: 'PDF export failed.', detail: String(err.message || err) });
+  } finally {
+    pdfExportInFlight = false;
+    if (exportButton) exportButton.disabled = false;
   }
 }
 
