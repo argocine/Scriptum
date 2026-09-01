@@ -8,16 +8,27 @@
 
 import { ElementType, ELEMENT_ORDER, ELEMENT_LABEL } from './core/format.js';
 import { createDocument, createElement, getScenes, getElement, indexOfElement } from './core/model.js';
+import { SaveCoordinator } from './core/save-coordinator.js';
 import { estimateRuntime } from './core/paginate.js';
 import { ScriptEditor, inferElements } from './ui/editor.js';
 import { CardBoard } from './features/cards.js';
+import { StoryTimeline } from './features/story-timeline.js';
+import { documentHasStoryMap } from './features/story.js';
+import { WritingSprint, formatSprintTime } from './features/sprint.js';
 import { Finder } from './features/find.js';
 import { parseFountain, toFountain } from './io/fountain.js';
 import { parseFDX, toFDX } from './io/fdx.js';
-import { exportPDF } from './io/pdf.js';
+import { mountPrintView } from './io/print-view.js';
+import { pdfSupportIssues } from './features/format-assistant.js';
+import { documentHasAlternates, hasAlternateDialogue } from './core/alternates.js';
+import { documentHasProductionTags } from './core/production.js';
+import { breakdownReport } from './features/reports.js';
 import {
   serializeProject,
   parseProject,
+  normalizeDocument,
+  assertDocumentBudget,
+  MAX_PROJECT_FILE_BYTES,
   toPlainText,
   writeAutosave,
   readAutosave,
@@ -29,13 +40,20 @@ import {
   pageSetupDialog,
   sceneNumbersDialog,
   revisionsDialog,
+  revisionRoomDialog,
+  storyEntryDialog,
+  sprintSetupDialog,
+  tableReadDialog,
   reportsDialog,
+  formatAssistantDialog,
+  productionTagDialog,
   notesDialog,
   gotoSceneDialog,
   pageLockDialog,
   lockScenesAction,
   shortcutsDialog,
   openDialog,
+  closeDialog,
   h,
 } from './ui/dialogs.js';
 
@@ -44,20 +62,29 @@ import {
  * ------------------------------------------------------------------ */
 
 const native = window.scriptum || null;
+document.documentElement.dataset.runtime = native ? 'native' : 'web';
+document.documentElement.dataset.platform = native?.platform || 'web';
 
 const platform = {
   isNative: !!native,
 
   async open(kinds) {
     if (native) return native.openDialog(kinds);
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = '.scriptum,.fdx,.fountain,.txt,.spmd';
       input.onchange = async () => {
-        const file = input.files?.[0];
-        if (!file) return resolve(null);
-        resolve({ path: file.name, data: await file.text() });
+        try {
+          const file = input.files?.[0];
+          if (!file) return resolve(null);
+          if (file.size > MAX_PROJECT_FILE_BYTES) {
+            throw new Error('That file is too large for Scriptum to open safely (96 MiB maximum).');
+          }
+          resolve({ path: file.name, data: await file.text() });
+        } catch (error) {
+          reject(error);
+        }
       };
       input.click();
     });
@@ -93,7 +120,7 @@ const platform = {
 
   async confirm(opts) {
     if (native) return native.confirm(opts);
-    return window.confirm(`${opts.message}\n\n${opts.detail || ''}`) ? 0 : opts.buttons.length - 1;
+    return browserConfirm(opts);
   },
 
   async error({ message, detail }) {
@@ -112,6 +139,27 @@ const platform = {
     native?.onMenu(channel, handler);
   },
 };
+
+function browserConfirm({ message, detail = '', buttons = ['OK'], defaultId = 0 }) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (index) => {
+      if (settled) return;
+      settled = true;
+      resolve(index);
+    };
+    openDialog({
+      title: message,
+      body: h('p', {}, detail),
+      buttons: buttons.map((label, index) => ({
+        label,
+        primary: index === defaultId,
+        onClick: () => finish(index),
+      })),
+      onClose: () => finish(buttons.length - 1),
+    });
+  });
+}
 
 function downloadBlob(blob, name) {
   const url = URL.createObjectURL(blob);
@@ -135,8 +183,10 @@ const dom = {
   paneScenes: document.getElementById('pane-scenes'),
   paneCharacters: document.getElementById('pane-characters'),
   paneNotes: document.getElementById('pane-notes'),
+  paneBreakdown: document.getElementById('pane-breakdown'),
   cardsView: document.getElementById('cards-view'),
   cardGrid: document.getElementById('card-grid'),
+  storyTimeline: document.getElementById('story-timeline'),
   findbar: document.getElementById('findbar'),
   toast: document.getElementById('toast'),
   stPage: document.getElementById('st-page'),
@@ -146,6 +196,13 @@ const dom = {
   stElement: document.getElementById('st-element'),
   zoom: document.getElementById('zoom-range'),
   zoomLabel: document.getElementById('zoom-label'),
+  focusHud: document.getElementById('focus-hud'),
+  focusTime: document.getElementById('focus-time'),
+  focusWords: document.getElementById('focus-words'),
+  focusProgress: document.getElementById('focus-progress'),
+  focusProgressFill: document.getElementById('focus-progress-fill'),
+  focusAnnouncer: document.getElementById('focus-announcer'),
+  recoveryWarning: document.getElementById('recovery-warning'),
 };
 
 const state = {
@@ -155,8 +212,15 @@ const state = {
   zoom: 100,
   theme: storedTheme(),
   cardsOpen: false,
+  boardMode: 'cards',
+  focusMode: false,
+  sprintStatus: 'idle',
   recoveryEnabled: true,
+  recoveryUnavailable: false,
 };
+
+const saveCoordinator = new SaveCoordinator();
+let recoveryQueue = Promise.resolve();
 
 const editor = new ScriptEditor({
   container: dom.pages,
@@ -167,36 +231,54 @@ const editor = new ScriptEditor({
 
 const finder = new Finder(editor);
 const board = new CardBoard(dom.cardGrid, editor, { onJumpToScene: jumpToScene });
+const timeline = new StoryTimeline(dom.storyTimeline, editor, {
+  onJumpToScene: jumpToScene,
+  onAddSection: (kind) => openStoryEntry(kind),
+  onAddLane: () => openStoryEntry('lane'),
+  onAddBeat: () => openStoryEntry('beat'),
+  onEditSection: (id) => openStoryEntry('section', id),
+  onEditLane: (id) => openStoryEntry('lane', id),
+  onEditBeat: (id) => openStoryEntry('beat', id),
+});
+const sprint = new WritingSprint();
+let sprintTimer = null;
 
 /* ------------------------------------------------------------------ *
  * Boot
  * ------------------------------------------------------------------ */
 
-function boot() {
+async function boot() {
   applyTheme(state.theme);
+  dom.pages.spellcheck = native?.platform === 'darwin';
   buildElementSelect();
   wireToolbar();
+  wireFocusControls();
+  wireBoardTabs();
   wireSidebar();
   wireFindBar();
   wireMenus();
   wireZoom();
 
-  const recovered = readAutosave();
+  const recovered = await readRecoveryData();
   if (recovered?.document && recovered.at > Date.now() - 1000 * 60 * 60 * 24 * 14) {
-    offerRecovery(recovered);
+    await offerRecovery(recovered);
   } else {
-    if (recovered) clearAutosave();
+    if (recovered) await clearRecoveryData();
     editor.load(sampleDocument());
     markClean();
   }
 
   setInterval(() => {
-    if (state.dirty && state.recoveryEnabled) writeAutosave(editor.doc, state.filePath);
+    if (state.dirty && state.recoveryEnabled) void writeRecoveryData();
   }, 20000);
+  updateSprintHud();
 
   window.addEventListener('beforeunload', (e) => {
     if (!state.dirty) return;
-    if (state.recoveryEnabled) writeAutosave(editor.doc, state.filePath);
+    if (state.recoveryEnabled) {
+      if (native) void writeRecoveryData();
+      else if (!writeAutosave(editor.doc, state.filePath)) showRecoveryWarning();
+    }
 
     // Only the browser build may veto here. Electron treats a cancelled
     // beforeunload as a silent, absolute refusal to close — there is no
@@ -208,6 +290,73 @@ function boot() {
     e.preventDefault();
     e.returnValue = '';
   });
+}
+
+async function readRecoveryData() {
+  if (!native) return readAutosave();
+  try {
+    const raw = await native.readRecovery();
+    return raw ? JSON.parse(raw) : readAutosave();
+  } catch (error) {
+    showRecoveryWarning();
+    console.error('Could not read local recovery data:', error);
+    return readAutosave();
+  }
+}
+
+function writeRecoveryData() {
+  if (!state.recoveryEnabled) return Promise.resolve(false);
+  let payload;
+  try {
+    payload = JSON.stringify({
+      at: Date.now(),
+      filePath: state.filePath || null,
+      document: editor.doc,
+    });
+  } catch (error) {
+    showRecoveryWarning();
+    console.error('Could not prepare local recovery data:', error);
+    return Promise.resolve(false);
+  }
+  const operation = recoveryQueue.then(async () => {
+    if (native) return native.writeRecovery(payload);
+    return writeAutosave(editor.doc, state.filePath);
+  });
+  recoveryQueue = operation.catch(() => {});
+  operation.then((ok) => {
+    if (ok === false) showRecoveryWarning();
+    else hideRecoveryWarning();
+  }).catch((error) => {
+    showRecoveryWarning();
+    console.error('Could not write local recovery data:', error);
+  });
+  return operation;
+}
+
+function clearRecoveryData() {
+  const operation = recoveryQueue.then(async () => {
+      clearAutosave();
+      if (native) await native.clearRecovery();
+      hideRecoveryWarning();
+      return true;
+    }).catch((error) => {
+      showRecoveryWarning();
+      console.error('Could not clear local recovery data:', error);
+      return false;
+    });
+  recoveryQueue = operation;
+  return operation;
+}
+
+function showRecoveryWarning() {
+  state.recoveryUnavailable = true;
+  if (dom.recoveryWarning) dom.recoveryWarning.hidden = false;
+  toast('Recovery is unavailable. Save your screenplay now.', 12000);
+}
+
+function hideRecoveryWarning() {
+  state.recoveryUnavailable = false;
+  if (dom.recoveryWarning) dom.recoveryWarning.hidden = true;
 }
 
 async function offerRecovery(recovered) {
@@ -222,12 +371,22 @@ async function offerRecovery(recovered) {
     buttons: ['Recover', 'Discard'],
   });
   if (choice === 0) {
-    editor.load(recovered.document);
-    state.filePath = recovered.filePath;
-    markDirty();
-    toast('Recovered your last autosave.');
+    try {
+      editor.load(normalizeDocument(recovered.document));
+      // File-access grants intentionally do not survive a restart. A recovered
+      // draft must use Save As instead of silently trusting yesterday's path.
+      state.filePath = null;
+      markDirty();
+      toast('Recovered your last autosave. Use Save As to keep it.');
+    } catch (error) {
+      await clearRecoveryData();
+      platform.error({
+        message: 'That recovery copy could not be restored safely.',
+        detail: String(error.message || error),
+      });
+    }
   } else {
-    clearAutosave();
+    await clearRecoveryData();
   }
 }
 
@@ -240,7 +399,7 @@ function buildElementSelect() {
   ELEMENT_ORDER.forEach((type, i) => {
     const opt = document.createElement('option');
     opt.value = type;
-    opt.textContent = `${ELEMENT_LABEL[type]}   ⌘${i + 1}`;
+    opt.textContent = `${ELEMENT_LABEL[type]}   Ctrl/⌘ ${i + 1}`;
     dom.elementSelect.appendChild(opt);
   });
   dom.elementSelect.addEventListener('change', () => {
@@ -252,23 +411,157 @@ function buildElementSelect() {
 function wireToolbar() {
   const on = (id, fn) => document.getElementById(id).addEventListener('click', fn);
 
+  on('tb-menu', appMenuDialog);
   on('tb-sidebar', toggleSidebar);
   on('tb-bold', () => editor.toggleStyle('bold'));
   on('tb-italic', () => editor.toggleStyle('italic'));
   on('tb-underline', () => editor.toggleStyle('underline'));
   on('tb-dual', toggleDualDialogue);
+  on('tb-alt', () => editor.addAlternateDialogue());
   on('tb-note', () => {
     const el = editor.currentElement();
     if (el) notesDialog(editor, el.id);
   });
+  on('tb-tag', () => productionTagDialog(editor, { toast }));
   on('tb-omit', omitScene);
-  on('tb-cards', toggleCards);
+  on('tb-cards', () => toggleCards('cards'));
+  on('tb-timeline', () => toggleCards('timeline'));
   on('tb-find', openFind);
   on('tb-revision', () => revisionsDialog(editor, toast));
+  on('tb-revision-room', openRevisionRoom);
+  on('tb-format-assistant', openFormatAssistant);
   on('tb-reports', openReports);
+  on('tb-table-read', () => tableReadDialog(editor));
   on('tb-title', () => titlePageDialog(editor));
+  on('tb-focus', toggleFocusMode);
+  on('tb-sprint', openSprintSetup);
   on('tb-privacy', privacyDialog);
   on('tb-pdf', exportPdf);
+}
+
+function wireFocusControls() {
+  document.getElementById('focus-start').addEventListener('click', openSprintSetup);
+  document.getElementById('focus-pause').addEventListener('click', toggleSprintPause);
+  document.getElementById('focus-end').addEventListener('click', finishWritingSprint);
+  document.getElementById('focus-exit').addEventListener('click', toggleFocusMode);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'F6') {
+      event.preventDefault();
+      const active = document.activeElement;
+      if (active === dom.pages || dom.pages.contains(active)) {
+        const target = !dom.focusHud.hidden
+          ? [...dom.focusHud.querySelectorAll('button')].find(
+              (button) => !button.hidden && !button.disabled
+            )
+          : [...document.querySelectorAll('#toolbar button:not([hidden]), #toolbar select:not([hidden])')]
+              .find((control) => control.getClientRects().length);
+        target?.focus();
+      } else {
+        dom.pages.focus();
+      }
+      return;
+    }
+    if (
+      event.key === 'Escape' &&
+      state.focusMode &&
+      document.getElementById('overlay').classList.contains('hidden')
+    ) {
+      event.preventDefault();
+      setFocusMode(false);
+    }
+  });
+}
+
+function appMenuDialog() {
+  const action = (label, run) =>
+    h('button', {
+      type: 'button',
+      class: 'btn app-menu-command',
+      onClick: () => {
+        closeDialog();
+        Promise.resolve().then(run).catch((error) =>
+          platform.error({ message: `${label} failed.`, detail: String(error.message || error) })
+        );
+      },
+    }, label);
+  const group = (name, commands) => h(
+    'section',
+    { class: 'app-menu-group', 'aria-label': name },
+    h('h3', {}, name),
+    h('div', { class: 'app-menu-grid' }, ...commands)
+  );
+  const body = h(
+    'div',
+    { class: 'app-menu' },
+    group('File', [
+      action('New Screenplay', newDocument),
+      action('Open…', () => openFile()),
+      action('Save', () => saveFile(false)),
+      action('Save As…', () => saveFile(true)),
+      action('Export PDF…', exportPdf),
+      action('Export Final Draft…', () => exportInterchangeWithAlternates('fdx', () => toFDX(editor.doc))),
+      action('Export Fountain…', () => exportInterchangeWithAlternates('fountain', () => toFountain(editor.doc))),
+      action('Export Plain Text…', () => exportText(toPlainText(editor.doc, editor.pagination, editor.styles), 'text')),
+    ]),
+    group('Document', [
+      action('Title Page', () => titlePageDialog(editor)),
+      action('Page Setup', () => pageSetupDialog(editor)),
+      action('Scene Numbers', () => sceneNumbersDialog(editor)),
+      action('Revision Sets', () => revisionsDialog(editor, toast)),
+      action('Revision Room', openRevisionRoom),
+      action('Format Assistant', openFormatAssistant),
+      action('Add Alternate Dialogue', () => editor.addAlternateDialogue()),
+      action('Previous Alternate Dialogue', () => stepCurrentAlternate(-1)),
+      action('Next Alternate Dialogue', () => stepCurrentAlternate(1)),
+      action('Remove Alternate Dialogue', removeCurrentAlternate),
+      action('Production Reports', openReports),
+      action('Table Read', () => tableReadDialog(editor)),
+    ]),
+    group('View & Help', [
+      action('Index Cards', () => toggleCards('cards')),
+      action('Story Timeline', () => toggleCards('timeline')),
+      action('Focus Mode', toggleFocusMode),
+      action('Keyboard Shortcuts', shortcutsDialog),
+      action('Privacy & Local Data', privacyDialog),
+    ])
+  );
+  openDialog({
+    title: 'Scriptum Menu',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+    initialFocus: '.app-menu-command',
+  });
+}
+
+function wireBoardTabs() {
+  const tabs = [
+    document.getElementById('board-tab-cards'),
+    document.getElementById('board-tab-timeline'),
+  ];
+  const activate = (index, focus = false) => {
+    state.boardMode = index === 0 ? 'cards' : 'timeline';
+    syncBoardMode();
+    if (focus) tabs[index].focus();
+  };
+  tabs.forEach((tab, index) => {
+    tab.addEventListener('click', () => activate(index));
+    tab.addEventListener('keydown', (event) => {
+      let target = index;
+      if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+      else if (event.key === 'ArrowLeft') target = (index - 1 + tabs.length) % tabs.length;
+      else if (event.key === 'Home') target = 0;
+      else if (event.key === 'End') target = tabs.length - 1;
+      else return;
+      event.preventDefault();
+      activate(target, true);
+    });
+  });
+  dom.cardsView.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !state.cardsOpen) return;
+    event.preventDefault();
+    closeBoard();
+  });
 }
 
 function wireSidebar() {
@@ -369,6 +662,7 @@ function wireFindBar() {
 }
 
 function openFind() {
+  if (state.focusMode) setFocusMode(false);
   dom.findbar.classList.add('open');
   const input = document.getElementById('find-input');
   input.focus();
@@ -398,8 +692,9 @@ function wireMenus() {
   m('menu:import-text', () => openFile(['text']));
 
   m('menu:export-pdf', exportPdf);
-  m('menu:export-fdx', () => exportText(toFDX(editor.doc), 'fdx'));
-  m('menu:export-fountain', () => exportText(toFountain(editor.doc), 'fountain'));
+  m('menu:export-fdx', () => exportInterchangeWithAlternates('fdx', () => toFDX(editor.doc)));
+  m('menu:export-fountain', () =>
+    exportInterchangeWithAlternates('fountain', () => toFountain(editor.doc)));
   m('menu:export-text', () =>
     exportText(toPlainText(editor.doc, editor.pagination, editor.styles), 'text'));
 
@@ -415,6 +710,12 @@ function wireMenus() {
   m('menu:italic', () => editor.toggleStyle('italic'));
   m('menu:underline', () => editor.toggleStyle('underline'));
   m('menu:dual', toggleDualDialogue);
+  m('menu:add-alternate', () => editor.addAlternateDialogue());
+  m('menu:previous-alternate', () => stepCurrentAlternate(-1));
+  m('menu:next-alternate', () => stepCurrentAlternate(1));
+  m('menu:remove-alternate', removeCurrentAlternate);
+  m('menu:production-tag', () => productionTagDialog(editor, { toast }));
+  m('menu:toggle-production-tags', toggleProductionTags);
 
   for (const type of ELEMENT_ORDER) {
     m(`menu:type-${type}`, () => editor.setElementType(type));
@@ -422,16 +723,24 @@ function wireMenus() {
 
   m('menu:element-settings', () => elementSettingsDialog(editor));
   m('menu:page-setup', () => pageSetupDialog(editor));
+  m('menu:format-assistant', openFormatAssistant);
   m('menu:scene-numbers', () => sceneNumbersDialog(editor));
   m('menu:lock-scenes', () => lockScenesAction(editor, toast));
   m('menu:revisions', () => revisionsDialog(editor, toast));
+  m('menu:revision-room', openRevisionRoom);
   m('menu:lock-pages', () => pageLockDialog(editor, true, toast));
   m('menu:unlock-pages', () => pageLockDialog(editor, false, toast));
   m('menu:omit-scene', omitScene);
   m('menu:title-page', () => titlePageDialog(editor));
 
   m('menu:toggle-sidebar', toggleSidebar);
-  m('menu:cards', toggleCards);
+  m('menu:cards', () => toggleCards('cards'));
+  m('menu:timeline', () => toggleCards('timeline'));
+  m('menu:focus', toggleFocusMode);
+  m('menu:sprint', openSprintSetup);
+  m('menu:sprint-pause', toggleSprintPause);
+  m('menu:sprint-end', finishWritingSprint);
+  m('menu:table-read', () => tableReadDialog(editor));
   m('menu:reports', openReports);
   m('menu:zoom-in', () => setZoom(state.zoom + 10));
   m('menu:zoom-out', () => setZoom(state.zoom - 10));
@@ -457,7 +766,47 @@ function wireMenus() {
     };
     if (k === 'b' && e.shiftKey) {
       e.preventDefault();
-      toggleCards();
+      toggleCards('cards');
+      return;
+    }
+    if (k === 'f' && e.shiftKey) {
+      e.preventDefault();
+      toggleFocusMode();
+      return;
+    }
+    if (k === 'k' && e.shiftKey) {
+      e.preventDefault();
+      openSprintSetup();
+      return;
+    }
+    if (k === ' ' && e.shiftKey) {
+      e.preventDefault();
+      toggleSprintPause();
+      return;
+    }
+    if (k === 'e' && e.shiftKey) {
+      e.preventDefault();
+      finishWritingSprint();
+      return;
+    }
+    if (k === 'y' && e.shiftKey) {
+      e.preventDefault();
+      tableReadDialog(editor);
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowLeft') {
+      e.preventDefault();
+      stepCurrentAlternate(-1);
+      return;
+    }
+    if (e.altKey && e.key === 'ArrowRight') {
+      e.preventDefault();
+      stepCurrentAlternate(1);
+      return;
+    }
+    if (e.altKey && e.key === 'Backspace') {
+      e.preventDefault();
+      removeCurrentAlternate();
       return;
     }
     if (map[k] && !(k === 'b' || k === 'i' || k === 'u')) {
@@ -476,6 +825,8 @@ function privacyDialog() {
     {},
     h('p', {}, 'Scriptum has no accounts, analytics, advertising, telemetry, cloud sync, or crash reporting.'),
     h('p', {}, 'Your screenplay is read only when you choose a file and written only to a destination you choose.'),
+    h('p', {}, 'Writing-sprint time and word progress stay in memory only and are discarded when the session ends or Scriptum quits.'),
+    h('p', {}, 'Table Read uses only voices marked on-device by the system. It refuses remote voices and never records audio.'),
     h('p', {}, recovery),
     h('p', { class: 'hint' }, 'The hosted browser version is delivered by GitHub Pages, whose normal web-server privacy terms apply.')
   );
@@ -487,7 +838,7 @@ function privacyDialog() {
         label: 'Clear & Disable Recovery',
         onClick: () => {
           state.recoveryEnabled = false;
-          clearAutosave();
+          void clearRecoveryData();
           toast('Recovery cleared and disabled until restart.');
         },
       },
@@ -514,18 +865,23 @@ async function confirmDiscard() {
 
 async function newDocument() {
   if (!(await confirmDiscard())) return;
+  resetWritingSprint();
   editor.load(createDocument());
   state.filePath = null;
-  clearAutosave();
+  await clearRecoveryData();
   markClean();
   toast('New screenplay.');
 }
 
 async function openFile(kinds) {
   if (!(await confirmDiscard())) return;
-  const picked = await platform.open(kinds);
-  if (!picked) return;
-  loadFromText(picked.path, picked.data);
+  try {
+    const picked = await platform.open(kinds);
+    if (!picked) return;
+    await loadFromText(picked.path, picked.data);
+  } catch (err) {
+    platform.error({ message: 'Could not open that file.', detail: String(err.message || err) });
+  }
 }
 
 async function openPath(path) {
@@ -533,15 +889,18 @@ async function openPath(path) {
   if (!(await confirmDiscard())) return;
   try {
     const data = await native.readFile(path);
-    loadFromText(path, data);
+    await loadFromText(path, data);
   } catch (err) {
     platform.error({ message: 'Could not open that file.', detail: String(err.message || err) });
   }
 }
 
-function loadFromText(path, data) {
+async function loadFromText(path, data) {
   const ext = (path.split('.').pop() || '').toLowerCase();
   try {
+    if (typeof data !== 'string' || data.length > MAX_PROJECT_FILE_BYTES) {
+      throw new Error('That file is too large for Scriptum to open safely.');
+    }
     let doc;
     if (ext === 'fdx') doc = parseFDX(data);
     else if (ext === 'fountain' || ext === 'spmd') doc = parseFountain(data);
@@ -549,7 +908,9 @@ function loadFromText(path, data) {
     else if (ext === 'txt') doc = docFromPlainText(data);
     else doc = data.trimStart().startsWith('{') ? parseProject(data) : parseFountain(data);
 
-    clearAutosave();
+    assertDocumentBudget(doc);
+    await clearRecoveryData();
+    resetWritingSprint();
     editor.load(doc);
     state.filePath = ext === 'scriptum' ? path : null; // imports save to a new file
     markClean();
@@ -569,48 +930,135 @@ function docFromPlainText(text) {
   return doc;
 }
 
-async function saveFile(forceDialog) {
-  const name = suggestedName('scriptum');
-  const text = serializeProject(editor.doc);
-
-  if (state.filePath && !forceDialog) {
+function saveFile(forceDialog) {
+  return saveCoordinator.enqueue(async (revision) => {
+    const name = suggestedName('scriptum');
+    const text = serializeProject(editor.doc);
     try {
-      await platform.writeTo(state.filePath, text);
-      clearAutosave();
-      markClean();
-      toast(`Saved ${baseName(state.filePath)}.`);
-      return state.filePath;
+      let savedPath = state.filePath;
+      if (savedPath && !forceDialog) {
+        await platform.writeTo(savedPath, text);
+      } else {
+        savedPath = await platform.save(text, { defaultName: name, kind: 'scriptum' });
+        if (!savedPath) return null;
+        state.filePath = savedPath;
+      }
+
+      if (markClean(revision)) {
+        await clearRecoveryData();
+        toast(`Saved ${baseName(savedPath)}.`);
+      } else {
+        await writeRecoveryData();
+        toast(`Saved ${baseName(savedPath)}; newer edits remain unsaved.`);
+      }
+      return savedPath;
     } catch (err) {
       platform.error({ message: 'Could not save.', detail: String(err.message || err) });
       return null;
     }
-  }
-
-  const path = await platform.save(text, { defaultName: name, kind: 'scriptum' });
-  if (!path) return null;
-  state.filePath = path;
-  clearAutosave();
-  markClean();
-  toast(`Saved ${baseName(path)}.`);
-  return path;
+  });
 }
 
 async function exportText(text, kind) {
   const ext = { fdx: 'fdx', fountain: 'fountain', text: 'txt', csv: 'csv' }[kind] || 'txt';
-  const path = await platform.save(text, { defaultName: suggestedName(ext), kind });
-  if (path) toast(`Exported ${baseName(path)}.`);
+  try {
+    const path = await platform.save(text, { defaultName: suggestedName(ext), kind });
+    if (path) toast(`Exported ${baseName(path)}.`);
+    return path;
+  } catch (error) {
+    platform.error({ message: 'Could not export.', detail: String(error.message || error) });
+    return null;
+  }
 }
 
-async function exportPdf() {
-  try {
-    const bytes = exportPDF(editor.doc, editor.pagination, editor.styles);
-    const path = await platform.saveBinary(bytes, {
-      defaultName: suggestedName('pdf'),
-      kind: 'pdf',
+async function exportInterchangeWithAlternates(kind, buildText) {
+  const hasAlternates = documentHasAlternates(editor.doc);
+  const hasTags = documentHasProductionTags(editor.doc);
+  const hasSnapshots = !!editor.doc.revisionRoom?.snapshots?.length;
+  const hasStory = documentHasStoryMap(editor.doc);
+  if (hasAlternates || hasTags || hasSnapshots || hasStory) {
+    const label = kind === 'fdx' ? 'Final Draft' : 'Fountain';
+    const omissions = [
+      hasAlternates ? 'inactive dialogue alternatives' : '',
+      hasTags ? 'production tags' : '',
+      hasSnapshots ? 'Revision Room snapshots' : '',
+      hasStory ? 'Story Timeline data' : '',
+    ].filter(Boolean).join(' and ');
+    const choice = await platform.confirm({
+      message: `Export screenplay text to ${label}?`,
+      detail:
+        `${label} export does not carry ${omissions}. ` +
+        'Save as .scriptum to preserve that information in the complete project file.',
+      buttons: ['Export Screenplay Text', 'Cancel'],
+      defaultId: 1,
     });
-    if (path) toast(`Exported ${editor.pagination.totalPages} pages to ${baseName(path)}.`);
+    if (choice !== 0) return;
+  }
+  await exportText(buildText(), kind);
+}
+
+let pdfExportInFlight = false;
+
+async function exportPdf() {
+  if (pdfExportInFlight) {
+    toast('PDF export is already in progress.');
+    return;
+  }
+  pdfExportInFlight = true;
+  const exportButton = document.getElementById('tb-pdf');
+  if (exportButton) exportButton.disabled = true;
+  try {
+    const unsupported = pdfSupportIssues(editor.doc, editor.pagination);
+    if (unsupported.length) {
+      const characterCount = unsupported.reduce((total, issue) => total + issue.count, 0);
+      const choice = await platform.confirm({
+        message: 'Some text contains invalid Unicode characters.',
+        detail:
+          `${characterCount} ${characterCount === 1 ? 'character' : 'characters'} in ` +
+          `${unsupported.length} ${unsupported.length === 1 ? 'place may' : 'places may'} ` +
+          'not print. Format Assistant can take you to each affected screenplay element.',
+        buttons: ['Export Anyway', 'Cancel'],
+        defaultId: 1,
+      });
+      if (choice !== 0) return;
+    }
+
+    const print = mountPrintView(
+      document.getElementById('pdf-print-root'),
+      editor.doc,
+      editor.pagination,
+      editor.styles
+    );
+
+    try {
+      await print.ready;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      if (!native) {
+        window.print();
+        toast('Use the browser print dialog to save the screenplay as PDF.');
+        return;
+      }
+
+      const bytes = await native.printToPDF({
+        width: print.model.width,
+        height: print.model.height,
+      });
+      const path = await platform.saveBinary(bytes, {
+        defaultName: suggestedName('pdf'),
+        kind: 'pdf',
+      });
+      if (path) {
+        toast(`Exported ${print.model.pages.length} pages to ${baseName(path)}.`);
+      }
+    } finally {
+      print.cleanup();
+    }
   } catch (err) {
     platform.error({ message: 'PDF export failed.', detail: String(err.message || err) });
+  } finally {
+    pdfExportInFlight = false;
+    if (exportButton) exportButton.disabled = false;
   }
 }
 
@@ -623,7 +1071,7 @@ async function requestClose() {
   let confirmed = false;
   try {
     confirmed = await confirmDiscard();
-    if (confirmed) clearAutosave();
+    if (confirmed) await clearRecoveryData();
   } catch (err) {
     // Never let a failure here trap the user inside the application.
     console.error('Close check failed, allowing the close anyway:', err);
@@ -648,6 +1096,34 @@ function baseName(p) {
 function toggleDualDialogue() {
   const el = editor.currentElement();
   if (!el) return;
+
+  // Turning an existing pair off is always allowed as a recovery path. When
+  // creating a pair, refuse any speech that carries alternates because dual
+  // rows do not expose the alternate-choice controls.
+  if (!el.dual) {
+    const doc = editor.doc;
+    const idx = indexOfElement(doc, el.id);
+    let currentStart = idx;
+    while (currentStart > 0 && isSpeech(doc.elements[currentStart - 1])) currentStart -= 1;
+    let currentEnd = currentStart;
+    while (
+      currentEnd + 1 < doc.elements.length &&
+      isSpeech(doc.elements[currentEnd + 1]) &&
+      doc.elements[currentEnd + 1].type !== ElementType.CHARACTER
+    ) currentEnd += 1;
+    let previousEnd = currentStart - 1;
+    while (previousEnd >= 0 && !isSpeech(doc.elements[previousEnd])) previousEnd -= 1;
+    let previousStart = previousEnd;
+    while (previousStart > 0 && isSpeech(doc.elements[previousStart - 1])) previousStart -= 1;
+    const involved = [
+      ...doc.elements.slice(Math.max(0, previousStart), previousEnd + 1),
+      ...doc.elements.slice(currentStart, currentEnd + 1),
+    ];
+    if (involved.some(hasAlternateDialogue)) {
+      toast('Remove stored alternate dialogue choices before creating a dual-dialogue pair.');
+      return;
+    }
+  }
 
   editor.commit(() => {
     const doc = editor.doc;
@@ -719,8 +1195,17 @@ function omitScene() {
   markDirty();
 }
 
+function toggleProductionTags() {
+  editor.commit(() => {
+    editor.doc.production.showTags = !editor.doc.production.showTags;
+    return null;
+  });
+  editor.hardRender(null);
+  toast(editor.doc.production.showTags ? 'Production tags shown.' : 'Production tags hidden.');
+}
+
 function jumpToScene(sceneId) {
-  if (state.cardsOpen) toggleCards();
+  if (state.cardsOpen) closeBoard();
   editor.renderer.scrollToElement(sceneId, 'smooth');
   editor.setCaret(sceneId, 0);
   dom.pages.focus();
@@ -729,10 +1214,95 @@ function jumpToScene(sceneId) {
 
 function openReports() {
   reportsDialog(editor, {
-    onExportCSV: (csv, name) =>
-      platform.save(csv, { defaultName: `${suggestedName('csv').replace('.csv', '')}-${name}.csv`, kind: 'csv' }),
+    onExportCSV: async (csv, name) => {
+      try {
+        const path = await platform.save(csv, {
+          defaultName: `${suggestedName('csv').replace('.csv', '')}-${name}.csv`,
+          kind: 'csv',
+        });
+        if (path) toast(`Exported ${baseName(path)}.`);
+        return path;
+      } catch (error) {
+        platform.error({ message: 'Could not export CSV.', detail: String(error.message || error) });
+        return null;
+      }
+    },
     onJumpToScene: jumpToScene,
   });
+}
+
+function openFormatAssistant() {
+  formatAssistantDialog(editor, { onGoTo: jumpToFormatIssue });
+}
+
+function openRevisionRoom() {
+  revisionRoomDialog(editor, {
+    confirm: (options) => platform.confirm(options),
+    normalizeState: normalizeDocument,
+    onGoTo: (elementId) => {
+      if (state.cardsOpen) closeBoard();
+      editor.renderer.scrollToElement(elementId, 'smooth');
+      editor.setCaret(elementId, 0, { scroll: true });
+      dom.pages.focus();
+    },
+    onExportReport: async (text, snapshotName) => {
+      const safe = snapshotName.replace(/[^\w\s-]/g, '').trim() || 'snapshot';
+      try {
+        const path = await platform.save(text, {
+          defaultName: `${suggestedName('txt').replace('.txt', '')}-${safe}-changes.txt`,
+          kind: 'text',
+        });
+        if (path) toast(`Exported ${baseName(path)}.`);
+      } catch (error) {
+        platform.error({
+          message: 'Could not export the Revision Room report.',
+          detail: String(error.message || error),
+        });
+      }
+    },
+    toast,
+  });
+}
+
+function openStoryEntry(kind, entryId = null) {
+  storyEntryDialog(editor, kind, {
+    entryId,
+    confirm: (options) => platform.confirm(options),
+    onChange: () => timeline.render(),
+    onFocus: (id) => {
+      if (!timeline.focusEntry(id)) document.getElementById('board-tab-timeline').focus();
+    },
+    toast,
+  });
+}
+
+function jumpToFormatIssue(issue) {
+  if (issue?.field?.startsWith('title.')) {
+    titlePageDialog(editor);
+    return;
+  }
+  if (issue?.field?.startsWith('revisions.')) {
+    revisionsDialog(editor, toast);
+    return;
+  }
+  if (!issue?.elementId) return;
+  if (state.cardsOpen) closeBoard();
+  const index = indexOfElement(editor.doc, issue.elementId);
+  if (index === -1) return;
+  editor.renderer.scrollToElement(issue.elementId, 'smooth');
+  const start = Math.max(0, issue.range?.start || 0);
+  const end = Math.max(start, issue.range?.end || start);
+  editor.setCaret(issue.elementId, start, { scroll: true });
+  if (end > start) {
+    editor.selectRange({
+      start: { elementId: issue.elementId, offset: start },
+      end: { elementId: issue.elementId, offset: end },
+      startIndex: index,
+      endIndex: index,
+      collapsed: false,
+    });
+  }
+  dom.pages.focus();
 }
 
 /* ------------------------------------------------------------------ *
@@ -744,16 +1314,175 @@ function toggleSidebar() {
   document.getElementById('tb-sidebar').setAttribute('aria-expanded', String(!collapsed));
 }
 
-function toggleCards() {
-  state.cardsOpen = !state.cardsOpen;
+function toggleCards(mode = 'cards') {
+  if (state.focusMode) setFocusMode(false);
+  if (state.cardsOpen && state.boardMode === mode) {
+    closeBoard();
+    return;
+  }
+  state.cardsOpen = true;
+  state.boardMode = mode;
   dom.cardsView.classList.toggle('open', state.cardsOpen);
   dom.cardsView.setAttribute('aria-hidden', String(!state.cardsOpen));
   dom.scroll.inert = state.cardsOpen;
-  const button = document.getElementById('tb-cards');
-  button.classList.toggle('active', state.cardsOpen);
-  button.setAttribute('aria-pressed', String(state.cardsOpen));
-  if (state.cardsOpen) board.render();
-  else dom.pages.focus();
+  syncBoardMode();
+  document.getElementById(mode === 'cards' ? 'board-tab-cards' : 'board-tab-timeline').focus();
+}
+
+function closeBoard() {
+  state.cardsOpen = false;
+  dom.cardsView.classList.remove('open');
+  dom.cardsView.setAttribute('aria-hidden', 'true');
+  dom.scroll.inert = false;
+  document.getElementById('tb-cards').classList.remove('active');
+  document.getElementById('tb-cards').setAttribute('aria-pressed', 'false');
+  document.getElementById('tb-timeline').classList.remove('active');
+  document.getElementById('tb-timeline').setAttribute('aria-pressed', 'false');
+  dom.pages.focus();
+}
+
+function syncBoardMode() {
+  const cards = state.boardMode === 'cards';
+  dom.cardGrid.classList.toggle('active', cards);
+  dom.storyTimeline.classList.toggle('active', !cards);
+  dom.cardGrid.hidden = !cards;
+  dom.storyTimeline.hidden = cards;
+  const cardTab = document.getElementById('board-tab-cards');
+  const timelineTab = document.getElementById('board-tab-timeline');
+  cardTab.classList.toggle('active', cards);
+  timelineTab.classList.toggle('active', !cards);
+  cardTab.setAttribute('aria-selected', String(cards));
+  timelineTab.setAttribute('aria-selected', String(!cards));
+  cardTab.tabIndex = cards ? 0 : -1;
+  timelineTab.tabIndex = cards ? -1 : 0;
+  const cardButton = document.getElementById('tb-cards');
+  const timelineButton = document.getElementById('tb-timeline');
+  cardButton.classList.toggle('active', cards);
+  timelineButton.classList.toggle('active', !cards);
+  cardButton.setAttribute('aria-pressed', String(cards));
+  timelineButton.setAttribute('aria-pressed', String(!cards));
+  if (cards) board.render();
+  else timeline.render();
+}
+
+function toggleFocusMode() {
+  setFocusMode(!state.focusMode);
+}
+
+function setFocusMode(enabled) {
+  state.focusMode = !!enabled;
+  if (state.focusMode) {
+    if (state.cardsOpen) closeBoard();
+    if (dom.findbar.classList.contains('open')) closeFind();
+  }
+  document.body.classList.toggle('focus-mode', state.focusMode);
+  const button = document.getElementById('tb-focus');
+  button.classList.toggle('active', state.focusMode);
+  button.setAttribute('aria-pressed', String(state.focusMode));
+  updateSprintHud();
+  dom.pages.focus();
+}
+
+function openSprintSetup() {
+  if (sprint.status !== 'idle') {
+    setFocusMode(true);
+    return;
+  }
+  sprintSetupDialog({ onStart: startWritingSprint });
+}
+
+function startWritingSprint(settings) {
+  const words = editor.stats().words;
+  sprint.start(settings, words);
+  state.sprintStatus = 'running';
+  document.body.classList.add('sprint-active');
+  clearInterval(sprintTimer);
+  sprintTimer = setInterval(updateSprintHud, 500);
+  setFocusMode(true);
+  announceSprint('Writing sprint started.');
+}
+
+function toggleSprintPause() {
+  const words = editor.stats().words;
+  if (sprint.status === 'running') {
+    sprint.pause(words);
+    announceSprint('Writing sprint paused.');
+  } else if (sprint.status === 'paused') {
+    sprint.resume(words);
+    announceSprint('Writing sprint resumed.');
+  }
+  updateSprintHud();
+  dom.pages.focus();
+}
+
+function finishWritingSprint({ silent = false } = {}) {
+  if (sprint.status === 'idle') return;
+  const final = sprint.status === 'completed'
+    ? sprint.snapshot(editor.stats().words)
+    : sprint.end(editor.stats().words);
+  sprint.reset();
+  state.sprintStatus = 'idle';
+  clearInterval(sprintTimer);
+  sprintTimer = null;
+  document.body.classList.remove('sprint-active');
+  updateSprintHud();
+  if (!silent) {
+    toast(`Sprint finished — ${final.wordsWritten} word${final.wordsWritten === 1 ? '' : 's'} written.`);
+    announceSprint(`Writing sprint finished with ${final.wordsWritten} words written.`);
+    if (state.focusMode) dom.pages.focus();
+    else document.getElementById('tb-sprint').focus();
+  }
+}
+
+function resetWritingSprint() {
+  finishWritingSprint({ silent: true });
+}
+
+function updateSprintHud() {
+  const snapshot = sprint.snapshot(editor.stats().words);
+  const hasSession = snapshot.status !== 'idle';
+  if (snapshot.status === 'completed' && state.sprintStatus !== 'completed') {
+    clearInterval(sprintTimer);
+    sprintTimer = null;
+    toast(`Time — ${snapshot.wordsWritten} word${snapshot.wordsWritten === 1 ? '' : 's'} written.`);
+    announceSprint(`Time is up. ${snapshot.wordsWritten} words written.`);
+  }
+  state.sprintStatus = snapshot.status;
+  document.body.classList.toggle('sprint-active', hasSession);
+  dom.focusHud.hidden = !state.focusMode && !hasSession;
+  dom.focusTime.textContent = hasSession ? formatSprintTime(snapshot.remainingMs) : 'Focus';
+  dom.focusWords.textContent = hasSession
+    ? snapshot.wordTarget
+      ? `${snapshot.wordsWritten} / ${snapshot.wordTarget}`
+      : `${snapshot.wordsWritten} written`
+    : 'No sprint';
+  const percent = Math.round(snapshot.progress * 100);
+  dom.focusProgress.setAttribute('aria-valuenow', String(percent));
+  dom.focusProgress.setAttribute(
+    'aria-valuetext',
+    hasSession
+      ? `${percent} percent; ${snapshot.wordsWritten} words written; ${formatSprintTime(snapshot.remainingMs)} remaining`
+      : 'No writing sprint in progress'
+  );
+  dom.focusProgressFill.style.width = `${percent}%`;
+  document.getElementById('focus-start').hidden = hasSession;
+  const pause = document.getElementById('focus-pause');
+  pause.hidden = !sprint.isActive();
+  pause.textContent = snapshot.status === 'paused' ? 'Resume' : 'Pause';
+  const end = document.getElementById('focus-end');
+  end.hidden = !hasSession;
+  end.textContent = snapshot.status === 'completed' ? 'Dismiss' : 'End Sprint';
+  document.getElementById('focus-exit').textContent = state.focusMode ? 'Exit Focus' : 'Return to Focus';
+  const sprintButton = document.getElementById('tb-sprint');
+  sprintButton.classList.toggle('active', hasSession);
+  sprintButton.setAttribute('aria-pressed', String(hasSession));
+}
+
+function announceSprint(message) {
+  dom.focusAnnouncer.textContent = '';
+  requestAnimationFrame(() => {
+    dom.focusAnnouncer.textContent = message;
+  });
 }
 
 function applyTheme(theme) {
@@ -781,6 +1510,10 @@ function storedTheme() {
 let sidebarTimer = null;
 
 function onEditorUpdate(ed, extra) {
+  if (extra?.notice) toast(extra.notice);
+  if (extra?.requestDeleteAlternate) {
+    confirmDeleteAlternate(extra.requestDeleteAlternate);
+  }
   if (extra?.openNotes) {
     notesDialog(ed, extra.openNotes);
     return;
@@ -789,9 +1522,39 @@ function onEditorUpdate(ed, extra) {
   // not flag the file as edited — otherwise every quit asks about saving work
   // that was never done.
   if (!extra?.viewOnly) markDirty();
+  if (sprint.status !== 'idle') updateSprintHud();
   refreshStatus();
   clearTimeout(sidebarTimer);
   sidebarTimer = setTimeout(refreshSidebar, 180);
+}
+
+async function confirmDeleteAlternate(elementId) {
+  const choice = await platform.confirm({
+    message: 'Remove this alternate dialogue?',
+    detail: 'The currently selected wording will be discarded and another stored choice will become active.',
+    buttons: ['Remove Alternate', 'Cancel'],
+    defaultId: 1,
+  });
+  if (choice === 0) editor.deleteActiveAlternateDialogue(elementId);
+}
+
+function stepCurrentAlternate(direction) {
+  const element = editor.currentElement();
+  if (!element || !hasAlternateDialogue(element)) {
+    toast('The current dialogue has no stored alternatives.');
+    return false;
+  }
+  return editor.stepAlternateDialogue(element.id, direction);
+}
+
+function removeCurrentAlternate() {
+  const element = editor.currentElement();
+  if (!element || !hasAlternateDialogue(element)) {
+    toast('The current dialogue has no stored alternatives.');
+    return false;
+  }
+  void confirmDeleteAlternate(element.id);
+  return true;
 }
 
 function refreshStatus() {
@@ -848,8 +1611,12 @@ function refreshSidebar() {
   const activePane = document.querySelector('.side-pane.active')?.id;
   if (activePane === 'pane-scenes') renderScenePane();
   else if (activePane === 'pane-characters') renderCharacterPane();
-  else renderNotesPane();
-  if (state.cardsOpen) board.render();
+  else if (activePane === 'pane-notes') renderNotesPane();
+  else renderBreakdownPane();
+  if (state.cardsOpen) {
+    if (state.boardMode === 'cards') board.render();
+    else timeline.render();
+  }
 }
 
 function renderScenePane() {
@@ -965,30 +1732,66 @@ function renderNotesPane() {
   }
 }
 
+function renderBreakdownPane() {
+  const pane = dom.paneBreakdown;
+  pane.innerHTML = '';
+  const rows = breakdownReport(editor.doc, editor.pagination);
+  if (!rows.length) {
+    pane.appendChild(
+      h('div', { class: 'side-empty' }, 'No production tags yet. Select screenplay text and press ', h('b', {}, 'Tag'), '.')
+    );
+    return;
+  }
+  for (const row of rows) {
+    const rowTag = row.sceneId ? 'button' : 'div';
+    const rowProps = row.sceneId
+      ? { type: 'button', class: 'nav-scene', onClick: () => jumpToScene(row.sceneId) }
+      : { class: 'nav-scene', 'aria-label': `Unassigned production item ${row.item}` };
+    pane.appendChild(
+      h(
+        rowTag,
+        rowProps,
+        h(
+          'div',
+          { class: 'h' },
+          h('span', { class: 'swatch', style: { background: row.color } }),
+          h('span', { class: 'n' }, row.scene),
+          h('span', { class: 't' }, row.item)
+        ),
+        h('div', { class: 'meta' }, h('span', {}, row.category), h('span', {}, `${row.count} occurrence${row.count === 1 ? '' : 's'}`))
+      )
+    );
+  }
+}
+
 /* ------------------------------------------------------------------ *
  * Dirty tracking
  * ------------------------------------------------------------------ */
 
 function markDirty() {
+  saveCoordinator.noteMutation();
   if (!state.dirty) {
     state.dirty = true;
     platform.setTitle(editor.doc.title.title || 'Untitled', true);
   }
 }
 
-function markClean() {
+function markClean(expectedRevision = null) {
+  if (expectedRevision !== null && !saveCoordinator.isCurrent(expectedRevision)) return false;
+  if (expectedRevision === null) saveCoordinator.resetBaseline();
   state.dirty = false;
   platform.setTitle(editor.doc.title.title || 'Untitled', false);
   refreshStatus();
   refreshSidebar();
+  return true;
 }
 
 let toastTimer = null;
-function toast(message) {
+function toast(message, duration = 2600) {
   dom.toast.textContent = message;
   dom.toast.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => dom.toast.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => dom.toast.classList.remove('show'), duration);
 }
 
 /* ------------------------------------------------------------------ *
@@ -1015,7 +1818,18 @@ function sampleDocument() {
   return doc;
 }
 
-boot();
+void boot().catch((error) => {
+  console.error('Scriptum could not finish starting:', error);
+  platform.error({ message: 'Scriptum could not finish starting.', detail: String(error.message || error) });
+});
 
 // Handy from the console and from automated checks; reads live state only.
-window.__scriptum = { editor, finder, board, state, platform };
+window.__scriptum = {
+  editor,
+  finder,
+  board,
+  timeline,
+  state,
+  platform,
+  commands: { saveFile, openFile, newDocument },
+};

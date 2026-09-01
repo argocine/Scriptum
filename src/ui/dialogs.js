@@ -30,7 +30,46 @@ import {
   SCENE_COLUMNS,
   CHARACTER_COLUMNS,
   LOCATION_COLUMNS,
+  breakdownReport,
+  BREAKDOWN_COLUMNS,
 } from '../features/reports.js';
+import { auditDocument } from '../features/format-assistant.js';
+import {
+  MAX_SPRINT_MINUTES,
+  MAX_SPRINT_WORD_TARGET,
+  MIN_SPRINT_MINUTES,
+} from '../features/sprint.js';
+import {
+  TableReadController,
+  buildTableReadSegments,
+  localSpeechVoices,
+  tableReadSpeakers,
+  voiceKey,
+} from '../features/table-read.js';
+import {
+  addProductionCategory,
+  applyProductionTag,
+  ensureProductionItem,
+  removeProductionTags,
+} from '../core/production.js';
+import {
+  MAX_SNAPSHOTS,
+  compareSnapshotToDocument,
+  createRevisionSnapshot,
+  deleteRevisionSnapshot,
+  restoreRevisionSnapshot,
+  revisionChangeReportText,
+} from '../features/snapshots.js';
+import {
+  MAX_STORY_BEATS,
+  MAX_STORY_LANES,
+  MAX_STORY_SECTIONS,
+  addStoryBeat,
+  addStoryLane,
+  addStorySection,
+  deleteStoryEntry,
+  updateStoryEntry,
+} from '../features/story.js';
 
 /* ------------------------------------------------------------------ *
  * Tiny DOM builder
@@ -60,7 +99,11 @@ export function h(tag, props = {}, ...children) {
 let closeCurrent = null;
 let fieldCounter = 0;
 
-export function openDialog({ title, body, buttons = [], wide = false, onClose }) {
+export function openDialog({ title, body, buttons = [], wide = false, onClose, initialFocus = null }) {
+  // One modal shell serves the whole application. Close the current owner
+  // before replacing its DOM so feature-specific cleanup (speech, timers,
+  // listeners) can never become unreachable behind a newer dialog.
+  closeCurrent?.();
   const overlay = document.getElementById('overlay');
   const dialog = document.getElementById('dialog');
   const titleEl = document.getElementById('dialog-title');
@@ -76,12 +119,13 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
   dialog.classList.toggle('wide', wide);
 
   const close = () => {
+    if (closeCurrent && closeCurrent !== close) return;
     overlay.classList.add('hidden');
     appEl.inert = false;
     document.removeEventListener('keydown', onKey);
-    closeCurrent = null;
+    if (closeCurrent === close) closeCurrent = null;
     onClose?.();
-    if (previousFocus?.isConnected) previousFocus.focus();
+    if (previousFocus?.isConnected && previousFocus.getClientRects().length) previousFocus.focus();
   };
   closeCurrent = close;
 
@@ -94,7 +138,7 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
           type: 'button',
           onClick: () => {
             const keepOpen = b.onClick?.();
-            if (!keepOpen) close();
+            if (!keepOpen && closeCurrent === close) close();
           },
         },
         b.label
@@ -106,7 +150,7 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
     if (e.key === 'Escape') {
       e.preventDefault();
       close();
-    } else if (e.key === 'Enter' && e.metaKey) {
+    } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       const primary = buttons.find((b) => b.primary);
       if (primary) {
         const keepOpen = primary.onClick?.();
@@ -136,9 +180,15 @@ export function openDialog({ title, body, buttons = [], wide = false, onClose })
 
   appEl.inert = true;
   overlay.classList.remove('hidden');
+  const requested = typeof initialFocus === 'string'
+    ? dialog.querySelector(initialFocus)
+    : initialFocus;
   const firstInput = bodyEl.querySelector('input, textarea, select');
+  const primaryButton = [...footEl.querySelectorAll('button')].find(
+    (_button, index) => buttons[index]?.primary
+  );
   const firstButton = footEl.querySelector('button');
-  (firstInput || firstButton || dialog).focus();
+  (requested || firstInput || primaryButton || firstButton || dialog).focus();
   return close;
 }
 
@@ -488,10 +538,18 @@ export function sceneNumbersDialog(editor) {
  * ------------------------------------------------------------------ */
 
 export function revisionsDialog(editor, toast) {
-  const rev = editor.doc.revisions;
+  const rev = JSON.parse(JSON.stringify(editor.doc.revisions));
+
+  const commitRevisionState = () => {
+    editor.commit(() => {
+      editor.doc.revisions = JSON.parse(JSON.stringify(rev));
+      return null;
+    });
+    editor.hardRender(null);
+  };
 
   const list = h('div', {});
-  const rebuild = () => {
+  const rebuild = (focusKey = '') => {
     list.innerHTML = '';
     if (!rev.sets.length) {
       list.appendChild(
@@ -520,9 +578,10 @@ export function revisionsDialog(editor, toast) {
             'button',
             {
               class: `btn${active ? ' active' : ''}`,
+              'data-revision-action': `current-${set.id}`,
               onClick: () => {
                 rev.current = active ? null : set.id;
-                rebuild();
+                rebuild(`current-${set.id}`);
               },
             },
             active ? 'Marking' : 'Set current'
@@ -531,10 +590,10 @@ export function revisionsDialog(editor, toast) {
             'button',
             {
               class: 'btn',
+              'data-revision-action': `visible-${set.id}`,
               onClick: () => {
                 set.active = !set.active;
-                rebuild();
-                editor.hardRender(null);
+                rebuild(`visible-${set.id}`);
               },
             },
             set.active === false ? 'Show' : 'Hide'
@@ -542,6 +601,7 @@ export function revisionsDialog(editor, toast) {
         )
       );
     }
+    if (focusKey) list.querySelector(`[data-revision-action="${focusKey}"]`)?.focus();
   };
   rebuild();
 
@@ -567,18 +627,24 @@ export function revisionsDialog(editor, toast) {
         { style: { display: 'flex', gap: '5px', flexWrap: 'wrap' } },
         ...REV_COLORS.map((c) => {
           const chip = h(
-            'span',
+            'label',
             {
               class: `rev-chip${c.color === draft.color ? ' on' : ''}`,
-              onClick: (e) => {
+            },
+            h('input', {
+              type: 'radio',
+              name: 'revision-colour',
+              value: c.color,
+              checked: c.color === draft.color,
+              onChange: (e) => {
                 draft.color = c.color;
                 draft.name = draft.name.replace(/^\w+ Revision$/, `${c.name} Revision`);
-                e.currentTarget.parentElement
+                e.currentTarget.closest('div')
                   .querySelectorAll('.rev-chip')
                   .forEach((x) => x.classList.remove('on'));
-                e.currentTarget.classList.add('on');
+                e.currentTarget.closest('.rev-chip').classList.add('on');
               },
-            },
+            }),
             h('span', { class: 'dot', style: { background: c.color } }),
             c.name
           );
@@ -597,12 +663,10 @@ export function revisionsDialog(editor, toast) {
       {
         label: 'Start New Revision',
         onClick: () => {
-          editor.commit(() => {
-            const id = `r${rev.sets.length + 1}`;
-            rev.sets.push({ ...draft, id, mark: '*', active: true });
-            rev.current = id;
-            return null;
-          });
+          const id = `r${Date.now().toString(36)}`;
+          rev.sets.push({ ...draft, id, mark: '*', active: true });
+          rev.current = id;
+          commitRevisionState();
           toast?.(`Now marking changes as "${draft.name}".`);
         },
       },
@@ -610,7 +674,7 @@ export function revisionsDialog(editor, toast) {
       {
         label: 'Done',
         primary: true,
-        onClick: () => editor.hardRender(null),
+        onClick: commitRevisionState,
       },
     ],
   });
@@ -622,6 +686,720 @@ function today() {
 }
 
 /* ------------------------------------------------------------------ *
+ * Revision Room snapshots
+ * ------------------------------------------------------------------ */
+
+export function revisionRoomDialog(
+  editor,
+  { confirm, normalizeState, onExportReport, onGoTo, toast } = {}
+) {
+  let selectedId = editor.doc.revisionRoom.snapshots.at(-1)?.id || null;
+  let comparison = null;
+  const nameInput = h('input', {
+    type: 'text',
+    maxlength: '120',
+    value: `Snapshot ${editor.doc.revisionRoom.snapshots.length + 1}`,
+  });
+  const noteInput = h('textarea', { maxlength: '2000', rows: '2', placeholder: 'Optional note' });
+  const list = h('div', { class: 'snapshot-list' });
+  const results = h('div', {
+    class: 'snapshot-results',
+    role: 'region',
+    'aria-label': 'Snapshot comparison results',
+  });
+  const resultStatus = h('div', { class: 'sr-only', role: 'status', 'aria-live': 'polite' });
+  const counter = h('div', { class: 'hint' });
+
+  const selectedSnapshot = () =>
+    editor.doc.revisionRoom.snapshots.find((snapshot) => snapshot.id === selectedId) || null;
+
+  const drawResults = () => {
+    results.innerHTML = '';
+    if (!comparison) {
+      resultStatus.textContent = 'No snapshot comparison is open.';
+      results.appendChild(
+        h('div', { class: 'side-empty' }, 'Choose a snapshot and compare it with the screenplay on screen.')
+      );
+      return;
+    }
+    const c = comparison;
+    resultStatus.textContent =
+      `Comparison ready: ${c.counts.added} added, ${c.counts.removed} removed, ` +
+      `${c.counts.changed} changed, and ${c.counts.moved} moved.`;
+    results.appendChild(
+      h(
+        'div',
+        { class: 'snapshot-summary' },
+        h('span', {}, `${c.counts.added} added`),
+        h('span', {}, `${c.counts.removed} removed`),
+        h('span', {}, `${c.counts.changed} changed`),
+        h('span', {}, `${c.counts.moved} moved`)
+      )
+    );
+    if (c.documentChanges.length) {
+      results.appendChild(
+        h('p', { class: 'hint' }, `Document settings changed: ${c.documentChanges.join(', ')}`)
+      );
+    }
+    if (!c.changes.length) {
+      results.appendChild(h('div', { class: 'side-empty' }, 'No screenplay-element differences.'));
+      return;
+    }
+    const rows = h('div', { class: 'snapshot-changes' });
+    for (const entry of c.changes) {
+      const targetId = editor.doc.elements.some((element) => element.id === entry.elementId)
+        ? entry.elementId
+        : null;
+      const row = h(
+        targetId ? 'button' : 'div',
+        targetId
+          ? { type: 'button', class: 'snapshot-change', onClick: () => onGoTo?.(targetId) }
+          : { class: 'snapshot-change' },
+        h('span', { class: `snapshot-kind ${entry.kind}` }, entry.kind),
+        h(
+          'span',
+          { class: 'snapshot-copy' },
+          h('b', {}, entry.afterScene || entry.beforeScene || 'Before first scene'),
+          h('span', {}, (entry.afterText || entry.beforeText || '(empty)').slice(0, 160)),
+          entry.fields?.length ? h('small', {}, entry.fields.join(', ')) : null
+        )
+      );
+      rows.appendChild(row);
+    }
+    results.appendChild(rows);
+  };
+
+  const rebuild = () => {
+    const snapshots = editor.doc.revisionRoom.snapshots;
+    counter.textContent = `${snapshots.length} of ${MAX_SNAPSHOTS} snapshots. They are stored locally in the screenplay and recovery data, and never uploaded by Scriptum.`;
+    list.innerHTML = '';
+    if (!snapshots.length) {
+      list.appendChild(h('div', { class: 'side-empty' }, 'No snapshots yet. Make one before a rewrite or major cut.'));
+    }
+    for (const snapshot of [...snapshots].reverse()) {
+      list.appendChild(
+        h(
+          'button',
+          {
+            type: 'button',
+            class: `snapshot-row${snapshot.id === selectedId ? ' active' : ''}`,
+            'aria-pressed': String(snapshot.id === selectedId),
+            onClick: () => {
+              selectedId = snapshot.id;
+              comparison = null;
+              rebuild();
+              drawResults();
+              list.querySelector('.snapshot-row.active')?.focus();
+            },
+          },
+          h('b', {}, snapshot.name),
+          h('span', {}, new Date(snapshot.created).toLocaleString()),
+          snapshot.note ? h('small', {}, snapshot.note) : null,
+          h('small', {}, `${snapshot.state.elements?.length || 0} elements`)
+        )
+      );
+    }
+  };
+
+  const controls = h(
+    'div',
+    { class: 'snapshot-controls' },
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn primary',
+        onClick: () => {
+          if (editor.doc.revisionRoom.snapshots.length >= MAX_SNAPSHOTS) {
+            toast?.(`Delete a snapshot before adding another; the limit is ${MAX_SNAPSHOTS}.`);
+            return;
+          }
+          let result;
+          editor.commit(() => {
+            result = createRevisionSnapshot(editor.doc, {
+              name: nameInput.value,
+              note: noteInput.value,
+            });
+            return null;
+          });
+          if (!result?.ok) {
+            toast?.(result?.reason || 'Could not create that snapshot.');
+            return;
+          }
+          selectedId = result.snapshot.id;
+          comparison = null;
+          nameInput.value = `Snapshot ${editor.doc.revisionRoom.snapshots.length + 1}`;
+          noteInput.value = '';
+          rebuild();
+          drawResults();
+          list.querySelector('.snapshot-row.active')?.focus();
+          toast?.(`Saved “${result.snapshot.name}”.`);
+        },
+      },
+      'Make Snapshot'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          comparison = compareSnapshotToDocument(snapshot, editor.doc);
+          drawResults();
+        },
+      },
+      'Compare to Current'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot || !comparison) return toast?.('Compare a snapshot before exporting its report.');
+          onExportReport?.(revisionChangeReportText(comparison, snapshot.name), snapshot.name);
+        },
+      },
+      'Export Report'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: async () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          if (editor.doc.revisionRoom.snapshots.length >= MAX_SNAPSHOTS) {
+            return toast?.('Delete one snapshot first so Scriptum can make a safety copy before restoring.');
+          }
+          const choice = await confirm?.({
+            message: `Restore “${snapshot.name}”?`,
+            detail: 'Scriptum will first make an automatic safety snapshot of the screenplay on screen.',
+            buttons: ['Restore Snapshot', 'Cancel'],
+            defaultId: 1,
+          });
+          if (choice !== 0) return;
+          let result;
+          editor.commit(() => {
+            result = restoreRevisionSnapshot(editor.doc, snapshot.id, { normalizeState });
+            return null;
+          }, { rebuildVocab: true });
+          if (!result?.ok) return toast?.(result?.reason || 'Could not restore that snapshot.');
+          editor.hardRender(null);
+          comparison = null;
+          selectedId = snapshot.id;
+          rebuild();
+          drawResults();
+          toast?.(`Restored “${snapshot.name}”; a safety snapshot was saved.`);
+        },
+      },
+      'Restore'
+    ),
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn danger',
+        onClick: async () => {
+          const snapshot = selectedSnapshot();
+          if (!snapshot) return toast?.('Choose a snapshot first.');
+          const choice = await confirm?.({
+            message: `Delete “${snapshot.name}”?`,
+            detail: 'This removes only the saved checkpoint, not the screenplay on screen.',
+            buttons: ['Delete Snapshot', 'Cancel'],
+            defaultId: 1,
+          });
+          if (choice !== 0) return;
+          editor.commit(() => {
+            deleteRevisionSnapshot(editor.doc, snapshot.id);
+            return null;
+          });
+          selectedId = editor.doc.revisionRoom.snapshots.at(-1)?.id || null;
+          comparison = null;
+          rebuild();
+          drawResults();
+        },
+      },
+      'Delete'
+    )
+  );
+
+  const body = h(
+    'div',
+    { class: 'revision-room' },
+    h(
+      'div',
+      { class: 'snapshot-create' },
+      field('Snapshot name', nameInput),
+      field('Note', noteInput),
+      controls,
+      counter
+    ),
+    resultStatus,
+    h('div', { class: 'snapshot-columns' }, list, results)
+  );
+  rebuild();
+  drawResults();
+  openDialog({
+    title: 'Revision Room',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Story Timeline editors
+ * ------------------------------------------------------------------ */
+
+export function storyEntryDialog(
+  editor,
+  kind,
+  { entryId = null, confirm, onChange, onFocus, toast } = {}
+) {
+  const story = editor.doc.story;
+  const collection = kind === 'lane' ? 'lanes' : kind === 'beat' ? 'beats' : 'sections';
+  const existing = story[collection].find((entry) => entry.id === entryId) || null;
+  let focusId = existing?.id || null;
+  const scenes = getScenes(editor.doc);
+  const current = editor.currentElement();
+  const currentScene = current
+    ? scenes.find((scene) => scene.elements.some((element) => element.id === current.id))
+    : null;
+
+  const draft = existing
+    ? { ...existing }
+    : kind === 'lane'
+      ? { name: `Story Lane ${story.lanes.length + 1}`, color: '#5b8dff' }
+      : kind === 'beat'
+        ? {
+            title: `Beat ${story.beats.length + 1}`,
+            description: '',
+            sceneId: currentScene?.id || null,
+            laneId: story.lanes[0]?.id || null,
+            color: '#e6c25a',
+          }
+        : {
+            kind: kind === 'sequence' ? 'sequence' : 'act',
+            name: kind === 'sequence' ? 'Sequence' : `Act ${story.sections.filter((s) => s.kind === 'act').length + 1}`,
+            startSceneId: currentScene?.id || scenes[0]?.id || null,
+            color: kind === 'sequence' ? '#8c75d6' : '#e06a80',
+          };
+
+  const sceneSelect = (value, onChange) =>
+    h(
+      'select',
+      { onChange: (event) => onChange(event.target.value || null) },
+      h('option', { value: '', selected: !value }, 'Unplaced'),
+      ...scenes.map((scene) =>
+        h(
+          'option',
+          { value: scene.id, selected: value === scene.id },
+          `${scene.sceneNumber || scene.index + 1}. ${scene.heading || '(untitled scene)'}`
+        )
+      )
+    );
+
+  let body;
+  let title;
+  if (kind === 'lane') {
+    title = existing ? 'Edit Story Lane' : 'Add Story Lane';
+    body = h(
+      'div',
+      {},
+      field('Name', textInput(draft.name, (value) => (draft.name = value), { maxlength: '120' })),
+      field(
+        'Colour',
+        h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+      ),
+      existing && story.lanes.length === 1
+        ? h('p', { class: 'hint' }, 'Every story map keeps at least one lane.')
+        : null
+    );
+  } else if (kind === 'beat') {
+    title = existing ? 'Edit Story Beat' : 'Add Story Beat';
+    const laneSelect = h(
+      'select',
+      { onChange: (event) => (draft.laneId = event.target.value || null) },
+      h('option', { value: '', selected: !draft.laneId }, 'Unassigned lane'),
+      ...story.lanes.map((lane) =>
+        h('option', { value: lane.id, selected: draft.laneId === lane.id }, lane.name)
+      )
+    );
+    body = h(
+      'div',
+      {},
+      field('Beat', textInput(draft.title, (value) => (draft.title = value), { maxlength: '160' })),
+      field(
+        'Description',
+        h('textarea', { maxlength: '4000', rows: '5', onInput: (event) => (draft.description = event.target.value) }, draft.description || '')
+      ),
+      h(
+        'div',
+        { class: 'row' },
+        field('Scene', sceneSelect(draft.sceneId, (value) => (draft.sceneId = value))),
+        field('Lane', laneSelect),
+        field(
+          'Colour',
+          h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+        )
+      )
+    );
+  } else {
+    title = existing ? 'Edit Story Section' : `Add ${draft.kind === 'sequence' ? 'Sequence' : 'Act'}`;
+    const kindSelect = h(
+      'select',
+      { onChange: (event) => (draft.kind = event.target.value) },
+      h('option', { value: 'act', selected: draft.kind === 'act' }, 'Act'),
+      h('option', { value: 'sequence', selected: draft.kind === 'sequence' }, 'Sequence')
+    );
+    body = h(
+      'div',
+      {},
+      field('Name', textInput(draft.name, (value) => (draft.name = value), { maxlength: '120' })),
+      h(
+        'div',
+        { class: 'row' },
+        field('Kind', kindSelect),
+        field('Begins at', sceneSelect(draft.startSceneId, (value) => (draft.startSceneId = value))),
+        field(
+          'Colour',
+          h('input', { type: 'color', value: draft.color, onInput: (event) => (draft.color = event.target.value) })
+        )
+      )
+    );
+  }
+
+  openDialog({
+    title,
+    body,
+    wide: kind === 'beat',
+    buttons: [
+      existing && {
+        label: 'Delete',
+        onClick: () => {
+          if (kind === 'lane' && story.lanes.length === 1) {
+            toast?.('Every story map keeps at least one lane.');
+            return true;
+          }
+          (async () => {
+            const choice = await confirm?.({
+              message: `Delete “${existing.name || existing.title}”?`,
+              detail: kind === 'lane'
+                ? 'Beats on this lane will move to Unassigned.'
+                : 'This removes only the story-map entry, not screenplay text.',
+              buttons: ['Delete', 'Cancel'],
+              defaultId: 1,
+            });
+            if (choice !== 0) return;
+            editor.commit(() => {
+              deleteStoryEntry(story, collection, existing.id);
+              return null;
+            });
+            focusId = null;
+            onChange?.();
+            closeDialog();
+          })();
+          return true;
+        },
+      },
+      { label: 'Cancel' },
+      {
+        label: existing ? 'Save' : 'Add',
+        primary: true,
+        onClick: () => {
+          const atLimit =
+            !existing &&
+            ((kind === 'lane' && story.lanes.length >= MAX_STORY_LANES) ||
+              (kind === 'beat' && story.beats.length >= MAX_STORY_BEATS) ||
+              ((kind === 'act' || kind === 'sequence') &&
+                story.sections.length >= MAX_STORY_SECTIONS));
+          if (atLimit) {
+            toast?.('The story map has reached its entry limit.');
+            return true;
+          }
+          let result = true;
+          editor.commit(() => {
+            if (existing) result = updateStoryEntry(story, collection, existing.id, draft);
+            else if (kind === 'lane') result = addStoryLane(story, draft);
+            else if (kind === 'beat') result = addStoryBeat(story, draft);
+            else result = addStorySection(story, draft);
+            return null;
+          });
+          if (!result) {
+            toast?.('The story map has reached its entry limit.');
+            return true;
+          }
+          focusId = result?.id || existing?.id || null;
+          onChange?.();
+        },
+      },
+    ].filter(Boolean),
+    onClose: () => onFocus?.(focusId),
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Format Assistant
+ * ------------------------------------------------------------------ */
+
+export function formatAssistantDialog(editor, { onGoTo } = {}) {
+  const issues = auditDocument(editor.doc, editor.pagination);
+  const counts = { error: 0, warning: 0, info: 0 };
+  issues.forEach((issue) => {
+    counts[issue.severity] += 1;
+  });
+
+  const summary = issues.length
+    ? `${issues.length} ${issues.length === 1 ? 'item' : 'items'} found: ` +
+      `${counts.error} errors, ${counts.warning} warnings, ${counts.info} information.`
+    : 'No structural or print compatibility problems found.';
+
+  const body = h(
+    'div',
+    {},
+    h('p', { class: 'format-summary', role: 'status', 'aria-live': 'polite' }, summary),
+    h(
+      'p',
+      { class: 'hint' },
+      'Format Assistant checks document structure and valid printable text. It does not judge spelling, grammar, or writing style.'
+    )
+  );
+
+  if (!issues.length) {
+    body.appendChild(h('div', { class: 'format-empty' }, 'Your screenplay passed every check.'));
+  } else {
+    const list = h('div', { class: 'format-issues', role: 'list', 'aria-label': 'Format issues' });
+    for (const issue of issues) {
+      const location = [
+        issue.page ? `Page ${issue.page}` : null,
+        issue.field?.startsWith('title.') ? 'Title page' : null,
+        issue.field?.startsWith('revisions.') ? 'Revision settings' : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const row = h(
+        'div',
+        { class: `format-issue ${issue.severity}`, role: 'listitem' },
+        h(
+          'div',
+          { class: 'format-issue-copy' },
+          h('div', { class: 'format-issue-level' }, issue.severity),
+          h('div', { class: 'format-issue-message' }, issue.message),
+          location ? h('div', { class: 'format-issue-location' }, location) : null
+        )
+      );
+      if (issue.elementId || issue.field) {
+        row.appendChild(
+          h(
+            'button',
+            {
+              type: 'button',
+              class: 'btn',
+              'aria-label': `Go to: ${issue.message}`,
+              onClick: () => {
+                closeDialog();
+                onGoTo?.(issue);
+              },
+            },
+            'Go To'
+          )
+        );
+      }
+      list.appendChild(row);
+    }
+    body.appendChild(list);
+  }
+
+  openDialog({
+    title: 'Format Assistant',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+  });
+
+  return issues;
+}
+
+/* ------------------------------------------------------------------ *
+ * Production tags
+ * ------------------------------------------------------------------ */
+
+export function productionTagDialog(editor, { toast } = {}) {
+  const selection = editor.getSelection();
+  if (!selection || selection.collapsed) {
+    editor.emit({ viewOnly: true, notice: 'Select screenplay text before applying a production tag.' });
+    return false;
+  }
+  const selectedElements = editor.doc.elements.slice(selection.startIndex, selection.endIndex + 1);
+  const touchesAlternates = selectedElements.some((element) => element.alternateDialogue);
+
+  const registry = JSON.parse(JSON.stringify(editor.doc.production));
+  let categoryId = registry.categories[0]?.id || '';
+  let itemId = '';
+  let itemName = '';
+
+  const categorySelect = h('select', { 'aria-label': 'Production category' });
+  const itemSelect = h('select', { 'aria-label': 'Existing breakdown item' });
+  const itemInput = textInput('', (value) => {
+    itemName = value;
+    if (value.trim()) {
+      itemId = '';
+      itemSelect.value = '';
+    }
+  }, {
+    placeholder: 'Or name a new item…',
+    maxlength: '120',
+  });
+  const showTags = h('input', { type: 'checkbox' });
+  showTags.checked = registry.showTags;
+
+  const refreshCategories = () => {
+    categorySelect.innerHTML = '';
+    for (const category of registry.categories) {
+      categorySelect.appendChild(
+        h('option', { value: category.id, selected: category.id === categoryId }, category.name)
+      );
+    }
+  };
+  const refreshItems = () => {
+    const items = registry.items.filter((item) => item.categoryId === categoryId);
+    itemSelect.innerHTML = '';
+    itemSelect.appendChild(h('option', { value: '' }, items.length ? 'Choose an existing item…' : 'No items in this category yet'));
+    for (const item of items) itemSelect.appendChild(h('option', { value: item.id }, item.name));
+    itemSelect.value = items.some((item) => item.id === itemId) ? itemId : '';
+    itemId = itemSelect.value;
+  };
+  categorySelect.addEventListener('change', () => {
+    categoryId = categorySelect.value;
+    itemId = '';
+    refreshItems();
+  });
+  itemSelect.addEventListener('change', () => {
+    itemId = itemSelect.value;
+    if (itemId) {
+      itemName = '';
+      itemInput.value = '';
+    }
+  });
+  refreshCategories();
+  refreshItems();
+
+  const categoryName = textInput('', () => {}, { placeholder: 'New category name', maxlength: '120' });
+  const categoryColor = h('input', { type: 'color', value: '#78909c', 'aria-label': 'New category colour' });
+  const categoryBuilder = h(
+    'div',
+    { class: 'row' },
+    categoryName,
+    categoryColor,
+    h(
+      'button',
+      {
+        type: 'button',
+        class: 'btn',
+        onClick: () => {
+          const category = addProductionCategory(registry, categoryName.value, categoryColor.value);
+          if (!category) return;
+          categoryId = category.id;
+          categoryName.value = '';
+          refreshCategories();
+          categorySelect.value = categoryId;
+          refreshItems();
+        },
+      },
+      'Add category'
+    )
+  );
+
+  const excerpt = selectedElements
+    .map((element, offset) => {
+      const index = selection.startIndex + offset;
+      const from = index === selection.startIndex ? selection.start.offset : 0;
+      const to = index === selection.endIndex ? selection.end.offset : element.text.length;
+      return element.text.slice(from, to);
+    })
+    .join(' ')
+    .trim();
+
+  const body = h(
+    'div',
+    {},
+    h('p', { class: 'hint' }, `Selected: “${excerpt.slice(0, 180)}${excerpt.length > 180 ? '…' : ''}”`),
+    field('Category', categorySelect),
+    field('Existing item', itemSelect),
+    field('New item', itemInput, 'A prop might be “silver lighter”; a cast item might be “Mara”.'),
+    h('div', { class: 'field' }, h('div', { class: 'field-label' }, 'Custom category'), categoryBuilder),
+    h('label', { class: 'check' }, showTags, 'Show coloured production tags in the editor')
+  );
+
+  const selectedBounds = (element, index) => ({
+    from: index === selection.startIndex ? selection.start.offset : 0,
+    to: index === selection.endIndex ? selection.end.offset : element.text.length,
+  });
+
+  openDialog({
+    title: 'Production Tag',
+    body,
+    wide: true,
+    buttons: [
+      {
+        label: 'Remove Tags',
+        onClick: () => {
+          let count = 0;
+          editor.commit(() => {
+            editor.doc.production = registry;
+            editor.doc.production.showTags = showTags.checked;
+            for (let i = selection.startIndex; i <= selection.endIndex; i += 1) {
+              const element = editor.doc.elements[i];
+              const { from, to } = selectedBounds(element, i);
+              count += removeProductionTags(element, from, to);
+            }
+            return null;
+          });
+          editor.hardRender(null);
+          toast?.(count ? `Removed ${count} production tag${count === 1 ? '' : 's'}.` : 'No tags crossed that selection.');
+        },
+      },
+      { label: 'Cancel' },
+      {
+        label: 'Apply Tag',
+        primary: true,
+        onClick: () => {
+          if (touchesAlternates) {
+            toast?.('Production tags cannot be added to dialogue with stored alternatives.');
+            return true;
+          }
+          const chosen = registry.items.find((item) => item.id === itemId) ||
+            ensureProductionItem(registry, categoryId, itemName);
+          if (!chosen) {
+            toast?.('Choose an existing item or enter a new item name.');
+            return true;
+          }
+          let count = 0;
+          editor.commit(() => {
+            editor.doc.production = registry;
+            editor.doc.production.showTags = showTags.checked;
+            for (let i = selection.startIndex; i <= selection.endIndex; i += 1) {
+              const element = editor.doc.elements[i];
+              const { from, to } = selectedBounds(element, i);
+              if (applyProductionTag(element, chosen.id, from, to)) count += 1;
+            }
+            return null;
+          });
+          editor.hardRender(null);
+          toast?.(`Tagged ${count} screenplay element${count === 1 ? '' : 's'} as ${chosen.name}.`);
+        },
+      },
+    ],
+  });
+  return true;
+}
+
+/* ------------------------------------------------------------------ *
  * Reports
  * ------------------------------------------------------------------ */
 
@@ -630,17 +1408,27 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
   const pagination = editor.pagination;
   const styles = editor.styles;
 
-  const tabs = ['Summary', 'Scenes', 'Characters', 'Locations'];
+  const tabs = ['Summary', 'Scenes', 'Characters', 'Locations', 'Breakdown'];
   let active = 'Summary';
+  let exportButton = null;
 
-  const content = h('div', {});
-  const tabBar = h('div', { class: 'side-tabs', style: { padding: '0 0 12px' } });
+  const content = h('div', { id: 'reports-panel', role: 'tabpanel' });
+  const tabBar = h('div', {
+    class: 'side-tabs',
+    style: { padding: '0 0 12px' },
+    role: 'tablist',
+    'aria-label': 'Report type',
+  });
 
   const draw = () => {
     content.innerHTML = '';
     tabBar.querySelectorAll('.side-tab').forEach((b) => {
-      b.classList.toggle('active', b.textContent === active);
+      const selected = b.textContent === active;
+      b.classList.toggle('active', selected);
+      b.setAttribute('aria-selected', String(selected));
+      b.tabIndex = selected ? 0 : -1;
     });
+    if (exportButton) exportButton.disabled = active === 'Summary';
 
     if (active === 'Summary') content.appendChild(summaryPane(doc, pagination, styles));
     else if (active === 'Scenes') {
@@ -649,20 +1437,41 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
       );
     } else if (active === 'Characters') {
       content.appendChild(characterPane(characterReport(doc, pagination)));
-    } else {
+    } else if (active === 'Locations') {
       content.appendChild(table(locationReport(doc, pagination), LOCATION_COLUMNS));
+    } else {
+      content.appendChild(
+        table(breakdownReport(doc, pagination), BREAKDOWN_COLUMNS, (row) => onJumpToScene?.(row.sceneId))
+      );
     }
   };
 
-  for (const t of tabs) {
+  const activateTab = (name, focus = false) => {
+    active = name;
+    draw();
+    if (focus) [...tabBar.querySelectorAll('.side-tab')].find((button) => button.textContent === name)?.focus();
+  };
+
+  for (const [index, t] of tabs.entries()) {
     tabBar.appendChild(
       h(
         'button',
         {
           class: `side-tab${t === active ? ' active' : ''}`,
-          onClick: () => {
-            active = t;
-            draw();
+          role: 'tab',
+          'aria-selected': t === active ? 'true' : 'false',
+          'aria-controls': 'reports-panel',
+          tabindex: t === active ? '0' : '-1',
+          onClick: () => activateTab(t),
+          onKeydown: (event) => {
+            let target = index;
+            if (event.key === 'ArrowRight') target = (index + 1) % tabs.length;
+            else if (event.key === 'ArrowLeft') target = (index - 1 + tabs.length) % tabs.length;
+            else if (event.key === 'Home') target = 0;
+            else if (event.key === 'End') target = tabs.length - 1;
+            else return;
+            event.preventDefault();
+            activateTab(tabs[target], true);
           },
         },
         t
@@ -685,6 +1494,7 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
             Scenes: [sceneReport(doc, pagination, styles), SCENE_COLUMNS, 'scenes'],
             Characters: [characterReport(doc, pagination), CHARACTER_COLUMNS, 'characters'],
             Locations: [locationReport(doc, pagination), LOCATION_COLUMNS, 'locations'],
+            Breakdown: [breakdownReport(doc, pagination), BREAKDOWN_COLUMNS, 'breakdown'],
           };
           const entry = map[active];
           if (!entry) return true; // Summary has nothing tabular to export
@@ -695,6 +1505,8 @@ export function reportsDialog(editor, { onExportCSV, onJumpToScene } = {}) {
       { label: 'Close', primary: true },
     ],
   });
+  exportButton = document.querySelector('#dialog-foot button');
+  if (exportButton) exportButton.disabled = true;
 }
 
 function summaryPane(doc, pagination, styles) {
@@ -772,18 +1584,21 @@ function table(rows, columns, onRowClick) {
   return h(
     'table',
     { class: 'data' },
-    h('thead', {}, h('tr', {}, ...columns.map((c) => h('th', {}, c.label)))),
+    h('thead', {}, h('tr', {}, ...columns.map((c) => h('th', {}, c.label)), onRowClick ? h('th', {}, 'Action') : null)),
     h(
       'tbody',
       {},
       ...rows.map((r) =>
         h(
           'tr',
-          { style: onRowClick ? { cursor: 'pointer' } : {}, onClick: () => onRowClick?.(r) },
+          {},
           ...columns.map((c) => {
             const v = c.get(r);
             return h('td', { class: typeof v === 'number' ? 'num' : '' }, Array.isArray(v) ? v.join(', ') : String(v ?? ''));
-          })
+          }),
+          onRowClick
+            ? h('td', {}, h('button', { class: 'btn', type: 'button', onClick: () => onRowClick(r) }, 'Go to scene'))
+            : null
         )
       )
     )
@@ -974,6 +1789,293 @@ export function lockScenesAction(editor, toast) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Local-only table read
+ * ------------------------------------------------------------------ */
+
+export function tableReadDialog(editor) {
+  const segments = buildTableReadSegments(editor.doc);
+  const speakers = tableReadSpeakers(segments);
+  const synthesis = window.speechSynthesis || null;
+  const Utterance = window.SpeechSynthesisUtterance || null;
+  let voices = [];
+  const assignments = new Map();
+  let activeLine = null;
+  let voicePoll = null;
+  let voiceSignature = '';
+
+  const privacy = h(
+    'p',
+    { class: 'hint table-read-privacy' },
+    'Local only: Scriptum offers voices marked on-device by your browser or operating system. It refuses remote-service voices and never records audio.'
+  );
+  const voiceStatus = h('div', { class: 'hint', role: 'status', 'aria-live': 'polite' });
+  const voiceGrid = h('div', { class: 'table-read-voices' });
+  const status = h('div', { class: 'table-read-status', role: 'status', 'aria-live': 'polite' });
+  const play = h('button', { class: 'btn primary', type: 'button' }, 'Read');
+  const pause = h('button', { class: 'btn', type: 'button', disabled: true }, 'Pause');
+  const stop = h('button', { class: 'btn', type: 'button', disabled: true }, 'Stop');
+  const previous = h('button', { class: 'btn', type: 'button', 'aria-label': 'Previous table-read line' }, '←');
+  const next = h('button', { class: 'btn', type: 'button', 'aria-label': 'Next table-read line' }, '→');
+  const rateValue = h('span', { class: 'mono' }, '1.0×');
+  const rate = h('input', {
+    type: 'range', min: '0.5', max: '2', step: '0.1', value: '1',
+    'aria-label': 'Table-read speed',
+  });
+  const controls = h(
+    'div',
+    { class: 'table-read-controls' },
+    play,
+    pause,
+    stop,
+    previous,
+    next,
+    h('label', { class: 'table-read-rate' }, 'Speed', rate, rateValue)
+  );
+  const list = h('div', {
+    class: 'table-read-list',
+    'aria-label': 'Table-read lines',
+    role: 'listbox',
+    tabindex: '0',
+  });
+  const lineButtons = new Map();
+  let controller = null;
+  const renderLineWindow = (center = 0) => {
+    const windowSize = 200;
+    const start = Math.max(0, Math.min(
+      Math.max(0, segments.length - windowSize),
+      center - Math.floor(windowSize / 2)
+    ));
+    const end = Math.min(segments.length, start + windowSize);
+    list.innerHTML = '';
+    lineButtons.clear();
+    for (let index = start; index < end; index += 1) {
+      const entry = segments[index];
+      const option = h(
+        'div',
+        {
+          id: `table-read-line-${index}`,
+          class: 'table-read-line',
+          role: 'option',
+          'aria-selected': index === center ? 'true' : 'false',
+          onClick: () => controller?.seek(index, { autoplay: controller.status === 'playing' }),
+        },
+        h('b', {}, entry.speaker),
+        h('span', {}, entry.text)
+      );
+      list.appendChild(option);
+      lineButtons.set(index, option);
+    }
+    const active = lineButtons.get(center);
+    if (active) list.setAttribute('aria-activedescendant', active.id);
+  };
+  renderLineWindow(0);
+
+  const resolveVoice = (entry) => {
+    const role = entry.kind === 'narration' ? 'Narrator' : entry.speaker;
+    const key = assignments.get(role) || assignments.get('Narrator');
+    return voices.find((voice) => voiceKey(voice) === key) || null;
+  };
+
+  controller = new TableReadController({
+    synthesis,
+    Utterance,
+    onUpdate: (snapshot) => {
+      const labels = {
+        idle: 'There is no screenplay text to read.',
+        ready: `${snapshot.total} lines ready.`,
+        playing: `Reading line ${snapshot.index + 1} of ${snapshot.total}: ${snapshot.segment?.speaker || ''}.`,
+        paused: `Paused at line ${snapshot.index + 1} of ${snapshot.total}.`,
+        stopped: `Stopped at line ${snapshot.index + 1} of ${snapshot.total}.`,
+        completed: `Table read complete — ${snapshot.total} lines.`,
+        error: snapshot.error,
+      };
+      status.textContent = labels[snapshot.status] || '';
+      play.textContent = snapshot.status === 'paused' ? 'Resume' : snapshot.status === 'completed' ? 'Read Again' : 'Read';
+      pause.disabled = snapshot.status !== 'playing';
+      stop.disabled = !['playing', 'paused'].includes(snapshot.status);
+      previous.disabled = !snapshot.total || snapshot.index <= 0;
+      next.disabled = !snapshot.total || snapshot.index >= snapshot.total - 1;
+      if (activeLine) {
+        activeLine.classList.remove('active');
+        activeLine.removeAttribute('aria-current');
+        activeLine.setAttribute('aria-selected', 'false');
+      }
+      if (!lineButtons.has(snapshot.index)) renderLineWindow(snapshot.index);
+      activeLine = lineButtons.get(snapshot.index) || null;
+      if (activeLine) {
+        activeLine.classList.add('active');
+        activeLine.setAttribute('aria-current', 'true');
+        activeLine.setAttribute('aria-selected', 'true');
+        list.setAttribute('aria-activedescendant', activeLine.id);
+        if (snapshot.status === 'playing') activeLine.scrollIntoView({ block: 'nearest' });
+      }
+    },
+  });
+  controller.load(segments, { resolveVoice });
+
+  const voiceOption = (voice, selected) =>
+    h(
+      'option',
+      { value: voiceKey(voice), selected },
+      `${voice.name || 'System voice'}${voice.lang ? ` — ${voice.lang}` : ''}`
+    );
+  const refreshVoices = () => {
+    try {
+      voices = localSpeechVoices(synthesis?.getVoices?.() || []);
+    } catch {
+      voices = [];
+    }
+    const signature = voices.map(voiceKey).join('\u0001');
+    if (signature === voiceSignature && voiceGrid.childElementCount) return;
+    voiceSignature = signature;
+    voiceGrid.innerHTML = '';
+    if (!voices.length) {
+      voiceStatus.textContent = synthesis
+        ? 'No on-device voices are available. Install or enable a local system voice to use Table Read.'
+        : 'Speech synthesis is not available in this browser or operating system.';
+      play.disabled = true;
+      return;
+    }
+    voiceStatus.textContent = `${voices.length} on-device voice${voices.length === 1 ? '' : 's'} available. Omitted scenes are skipped.`;
+    const roles = ['Narrator', ...speakers];
+    roles.forEach((role, index) => {
+      const existing = assignments.get(role);
+      const selected = voices.some((voice) => voiceKey(voice) === existing)
+        ? existing
+        : voiceKey(voices[index % voices.length]);
+      assignments.set(role, selected);
+      const select = h(
+        'select',
+        { onChange: (event) => assignments.set(role, event.target.value) },
+        ...voices.map((voice) => voiceOption(voice, voiceKey(voice) === selected))
+      );
+      voiceGrid.appendChild(field(role, select));
+    });
+    play.disabled = !segments.length;
+    if (voices.length && voicePoll) {
+      clearInterval(voicePoll);
+      voicePoll = null;
+    }
+  };
+
+  play.addEventListener('click', () => controller.play());
+  pause.addEventListener('click', () => controller.pause());
+  stop.addEventListener('click', () => controller.stop());
+  previous.addEventListener('click', () => controller.seek(controller.index - 1));
+  next.addEventListener('click', () => controller.seek(controller.index + 1));
+  rate.addEventListener('input', () => {
+    const value = controller.setRate(Number(rate.value));
+    rateValue.textContent = `${value.toFixed(1)}×`;
+  });
+  list.addEventListener('keydown', (event) => {
+    let index = controller.index;
+    if (event.key === 'ArrowDown') index += 1;
+    else if (event.key === 'ArrowUp') index -= 1;
+    else if (event.key === 'PageDown') index += 20;
+    else if (event.key === 'PageUp') index -= 20;
+    else if (event.key === 'Home') index = 0;
+    else if (event.key === 'End') index = segments.length - 1;
+    else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      controller.play();
+      return;
+    } else return;
+    event.preventDefault();
+    controller.seek(Math.max(0, Math.min(segments.length - 1, index)), {
+      autoplay: controller.status === 'playing',
+    });
+  });
+
+  const onVoicesChanged = () => refreshVoices();
+  synthesis?.addEventListener?.('voiceschanged', onVoicesChanged);
+  refreshVoices();
+  if (synthesis && !voices.length) {
+    let attempts = 0;
+    voicePoll = setInterval(() => {
+      attempts += 1;
+      refreshVoices();
+      if (attempts >= 20 && voicePoll) {
+        clearInterval(voicePoll);
+        voicePoll = null;
+      }
+    }, 250);
+  }
+
+  const body = h('div', {}, privacy, voiceStatus, voiceGrid, controls, status, list);
+  openDialog({
+    title: 'Table Read',
+    body,
+    wide: true,
+    buttons: [{ label: 'Close', primary: true }],
+    onClose: () => {
+      controller.destroy();
+      synthesis?.removeEventListener?.('voiceschanged', onVoicesChanged);
+      if (voicePoll) clearInterval(voicePoll);
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * Focus mode / writing sprints
+ * ------------------------------------------------------------------ */
+
+export function sprintSetupDialog({ onStart } = {}) {
+  let durationMinutes = 25;
+  let wordTarget = 500;
+  let pendingStart = null;
+  const body = h(
+    'div',
+    {},
+    h(
+      'p',
+      { class: 'hint', style: { marginTop: '0' } },
+      'Set a quiet block of writing time. Sprint progress stays in memory and is discarded when the session ends.'
+    ),
+    h(
+      'div',
+      { class: 'row' },
+      field(
+        'Minutes',
+        numberInput(durationMinutes, (value) => (durationMinutes = value), {
+          min: String(MIN_SPRINT_MINUTES),
+          max: String(MAX_SPRINT_MINUTES),
+          step: '1',
+          required: true,
+        }),
+        `${MIN_SPRINT_MINUTES}–${MAX_SPRINT_MINUTES} minutes`
+      ),
+      field(
+        'Word target',
+        numberInput(wordTarget, (value) => (wordTarget = value), {
+          min: '0',
+          max: String(MAX_SPRINT_WORD_TARGET),
+          step: '25',
+          required: true,
+        }),
+        'Use 0 for a timer-only session'
+      )
+    )
+  );
+  openDialog({
+    title: 'Start a Writing Sprint',
+    body,
+    buttons: [
+      { label: 'Cancel' },
+      {
+        label: 'Begin Sprint',
+        primary: true,
+        onClick: () => {
+          pendingStart = { durationMinutes, wordTarget };
+        },
+      },
+    ],
+    onClose: () => {
+      if (pendingStart) onStart?.(pendingStart);
+    },
+  });
+}
+
+/* ------------------------------------------------------------------ *
  * Keyboard shortcuts
  * ------------------------------------------------------------------ */
 
@@ -986,34 +2088,44 @@ export function shortcutsDialog() {
         ['Tab', 'Cycle element type — or add a parenthetical after a cue'],
         ['Shift-Tab', 'Cycle backwards'],
         ['Backspace at start', 'Merge into the element above'],
-        ['⌘1 – ⌘9', 'Set element type directly'],
+        ['Ctrl/⌘ + 1–9', 'Set element type directly'],
+        ['Escape', 'Move from the screenplay to inline tools or the toolbar'],
       ],
     ],
     [
       'Format',
       [
-        ['⌘B / ⌘I / ⌘U', 'Bold, italic, underline'],
-        ['⌘⌥D', 'Toggle dual dialogue'],
+        ['Ctrl/⌘ + B / I / U', 'Bold, italic, underline'],
+        ['Ctrl/⌘ + Alt + D', 'Toggle dual dialogue'],
+        ['Ctrl/⌘ + Alt + L', 'Add alternate dialogue'],
+        ['Ctrl/⌘ + Alt + ← / →', 'Previous / next alternate dialogue'],
+        ['Ctrl/⌘ + Alt + Backspace', 'Remove current alternate dialogue'],
       ],
     ],
     [
       'Navigate',
       [
-        ['⌘F', 'Find and replace'],
-        ['⌘G / ⌘⇧G', 'Find next / previous'],
-        ['⌘J', 'Go to scene'],
-        ['⌘\\', 'Toggle sidebar'],
-        ['⌘⇧B', 'Index cards'],
-        ['⌘R', 'Reports'],
+        ['Ctrl/⌘ + F', 'Find and replace'],
+        ['Ctrl/⌘ + G / Shift + G', 'Find next / previous'],
+        ['Ctrl/⌘ + J', 'Go to scene'],
+        ['Ctrl/⌘ + \\', 'Toggle sidebar'],
+        ['Ctrl/⌘ + Shift + B', 'Index cards'],
+        ['Ctrl/⌘ + Shift + F', 'Focus mode'],
+        ['Ctrl/⌘ + Shift + K', 'Writing sprint'],
+        ['F6', 'Move between the screenplay and app controls'],
+        ['Ctrl/⌘ + Shift + Space', 'Pause or resume a sprint'],
+        ['Ctrl/⌘ + Shift + E', 'End a sprint'],
+        ['Ctrl/⌘ + Shift + Y', 'Open Table Read'],
+        ['Ctrl/⌘ + R', 'Reports'],
       ],
     ],
     [
       'File',
       [
-        ['⌘S', 'Save'],
-        ['⌘P', 'Export PDF'],
-        ['⌘O', 'Open'],
-        ['⌘Z / ⌘⇧Z', 'Undo / redo'],
+        ['Ctrl/⌘ + S', 'Save'],
+        ['Ctrl/⌘ + P', 'Export PDF'],
+        ['Ctrl/⌘ + O', 'Open'],
+        ['Ctrl/⌘ + Z / Shift + Z', 'Undo / redo'],
       ],
     ],
   ];
