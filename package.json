@@ -1,7 +1,7 @@
 {
   "name": "scriptum",
   "productName": "Scriptum",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "A free, professional screenwriting application with industry-standard formatting.",
   "type": "module",
