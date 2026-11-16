@@ -35,9 +35,9 @@
   },
   "devDependencies": {
     "@electron/get": "^5.1.0",
-    "electron": "^44.1.0",
-    "electron-builder": "^26.15.3",
-    "plist": "^5.0.0",
+    "electron": "^45.3.2",
+    "electron-builder": "^26.18.0",
+    "plist": "^5.1.1",
     "unzipper": "^0.12.5"
   },
   "build": {
